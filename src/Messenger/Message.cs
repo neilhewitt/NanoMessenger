@@ -4,7 +4,7 @@ namespace NanoMessenger
 {
     public class Message
     {
-        public static Message FromMessageString(string messageString)
+        public static Message Parse(string messageString)
         {
             string[] messageParts = messageString.Split('|');
             

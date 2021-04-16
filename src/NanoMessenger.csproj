@@ -5,6 +5,12 @@
     <AssemblyName>NanoMessenger</AssemblyName>
     <RootNamespace>NanoMessenger</RootNamespace>
     <Configurations>Debug;Release</Configurations>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Version>0.1.0</Version>
   </PropertyGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="copy $(OutDir)\..\*.nupkg c:\NuGet" />
+  </Target>
 
 </Project>

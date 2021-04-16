@@ -12,6 +12,10 @@ namespace NanoMessenger
 {
     public class Messenger : IDisposable
     {
+        public const string INTERNAL_MESSAGE_PREFIX = "$$";
+        public const string PING_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PING";
+        public const string ACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ACK";
+
         private Task _processMessagesTask;
         private Task _pingTask;
 
@@ -23,22 +27,20 @@ namespace NanoMessenger
         private bool _connected;
         private bool _disconnecting;
         private bool _listening;
-        private bool _threadShouldDie;
+        private bool _terminateThreads;
 
         private byte[] _buffer = new byte[32768];
         private string _data = String.Empty;
 
         private int _connectionAttempts;
-        private DateTime _lastPingTime = DateTime.Now;
 
-        private List<QueueItem> _messageQueue = new List<QueueItem>();
+        private List<QueueEntry> _messageQueue = new List<QueueEntry>();
 
         public IPAddress EndPointAddress { get; private set; }
         public string HostName { get; private set; }
         public ushort Port { get; private set; }
         public MessengerType Type { get; private set; }
         public bool Connected => _connected;
-        public int ConnectionAttemptsSinceDisconnect => _connectionAttempts;
         public bool PingEnabled { get; set; } = true;
 
         public event EventHandler<Message> OnReceiveMessage;
@@ -61,7 +63,7 @@ namespace NanoMessenger
 
                 if ((_processMessagesTask == null && _pingTask == null) || (_processMessagesTask.IsCompleted && _pingTask.IsCompleted))
                 {
-                    _processMessagesTask = Task.Run(ProcessMessageLoop);
+                    _processMessagesTask = Task.Run(MessageLoop);
                     _pingTask = Task.Run(PingLoop);
                 }
             }
@@ -69,7 +71,7 @@ namespace NanoMessenger
 
         public void Close()
         {
-            _threadShouldDie = true;
+            _terminateThreads = true;
             _disconnecting = true;
             _stream?.Close();
             _client?.Close();
@@ -81,11 +83,16 @@ namespace NanoMessenger
             _connected = false;
         }
 
-        public void QueueMessage(string text, Action<string> callback = null)
+        public void QueueMessage(string text, Action<string> callbackAfterSent = null)
         {
             lock (_messageQueue)
             {
-                QueueItem item = new QueueItem(new Message(text), callback);
+                if (text.StartsWith(INTERNAL_MESSAGE_PREFIX))
+                {
+                    throw new ArgumentException($"Message begins with illegal sequence '{ INTERNAL_MESSAGE_PREFIX }' - use '\\{ INTERNAL_MESSAGE_PREFIX }' to escape.");
+                }
+
+                QueueEntry item = new QueueEntry(new Message(text), callbackAfterSent);
                 _messageQueue.Add(item);
             }
         }
@@ -116,19 +123,19 @@ namespace NanoMessenger
 
         private void PingLoop()
         {
-            while (!_threadShouldDie)
+            while (!_terminateThreads)
             {
                 if (!_disconnecting && PingEnabled)
                 {
-                    Send("PING"); // if the connection goes down, Send() will notify clients and start the reconnect attempt
+                    Send(PING_MESSAGE); // if the connection goes down, Send() will notify clients and start the reconnect attempt
                     Thread.Sleep(5000); // pause 5 seconds between PINGs
                 }
             }
         }
 
-        private void ProcessMessageLoop()
+        private void MessageLoop()
         {
-            while (!_threadShouldDie)
+            while (!_terminateThreads)
             {
                 // handle initial connection via listener or tcpClient
                 if (Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
@@ -136,30 +143,28 @@ namespace NanoMessenger
                     // only accept 1 client
                     if (_client == null)
                     {
-                        OnConnecting?.Invoke(this, new EventArgs());
+                        OnConnecting?.Invoke(this, EventArgs.Empty);
                         _client = _listener.AcceptTcpClient();
+                        _listener.Stop();
                         _listening = false;
                         _connected = true;
-                        _connectionAttempts = 0;
-                        _listener.Stop();
-                        OnConnected?.Invoke(this, new EventArgs());
+                        OnConnected?.Invoke(this, EventArgs.Empty);
                     }
                     else
                     {
-                        _connectionAttempts++;
                         OnConnectionRetry?.Invoke(this, HostName);
                         Thread.Sleep(3000); // wait for connections intermittently
                     }
                 }
                 else if (Type == MessengerType.Transmit && _client == null)
                 {
-                    OnConnecting?.Invoke(this, new EventArgs());
+                    OnConnecting?.Invoke(this, EventArgs.Empty);
                     TcpClient client = new TcpClient();
                     try
                     {
                         client.ConnectAsync(EndPointAddress, Port).Wait(10000);
                     }
-                    catch (Exception ex)
+                    catch
                     {
                         // couldn't connect yet... this is fine
                     }
@@ -168,12 +173,10 @@ namespace NanoMessenger
                     {
                         _client = client;
                         _connected = true;
-                        _connectionAttempts = 0;
-                        OnConnected?.Invoke(this, new EventArgs());
+                        OnConnected?.Invoke(this, EventArgs.Empty);
                     }
                     else
                     {
-                        _connectionAttempts++;
                         OnConnectionRetry?.Invoke(this, HostName);
                         Thread.Sleep(3000);
                     }
@@ -192,12 +195,15 @@ namespace NanoMessenger
                     {
                         if (!_disconnecting && _messageQueue.Count > 0)
                         {
-                            foreach (QueueItem messageAndCallback in _messageQueue)
+                            foreach (QueueEntry messageAndCallback in _messageQueue)
                             {
-                                Send($"{ messageAndCallback.Message.ToString() }");
+                                if (Send($"{ messageAndCallback.Message.ToString() }"))
+                                {
+                                    _messageQueue.Remove(messageAndCallback);
+                                }
+
                                 messageAndCallback.Callback?.Invoke($"{ messageAndCallback.Message.ToString() }");
                             }
-                            _messageQueue.Clear();
                         }
                     }
                 }
@@ -216,16 +222,16 @@ namespace NanoMessenger
                             if (message.EndsWith("\n"))
                             {
                                 string cleanedMessage = message.Replace("\n", String.Empty);
-                                if (cleanedMessage != String.Empty && cleanedMessage != "PING")
+                                if (cleanedMessage != String.Empty && cleanedMessage != PING_MESSAGE)
                                 {
-                                    if (cleanedMessage.StartsWith("ACK "))
+                                    if (cleanedMessage.StartsWith(ACK_MESSAGE))
                                     {
                                         OnReceiveAcknowledge?.Invoke(this, Guid.Parse(cleanedMessage.Substring(4)));
                                     }
                                     else
                                     {
-                                        Message incomingMessage = Message.FromMessageString(cleanedMessage);
-                                        Send($"ACK { incomingMessage.ID }");
+                                        Message incomingMessage = Message.Parse(cleanedMessage);
+                                        Send($"{ ACK_MESSAGE } { incomingMessage.ID }");
                                         OnReceiveMessage?.Invoke(this, incomingMessage);
                                     }
                                 }
@@ -236,7 +242,7 @@ namespace NanoMessenger
                             }
                             else
                             {
-                                // store the current partial message for next go around the loop
+                                // store the current partial message for next time around the loop
                                 _data = message;
                             }
                         }
@@ -244,9 +250,9 @@ namespace NanoMessenger
                 }
                 catch (IOException)
                 {
-                    // probably the client closed down... this will get handled on the next loop
+                    // probably the client closed down... this will get handled in the next loop
                 }
-                catch (Exception ex)
+                catch
                 {
                     throw; // anything else is fatal
                 }
@@ -254,33 +260,28 @@ namespace NanoMessenger
 
         }
 
-        private void Send(string text)
+        private bool Send(string text)
         {
             if (_stream != null && _client != null && _connected && _client.Connected)
             {
                 try
                 {
+                    if (text.StartsWith($"\\{ INTERNAL_MESSAGE_PREFIX }")) text = text.Substring(1); // handle escaped prefix
                     byte[] textBytes = Encoding.ASCII.GetBytes($"{text}\n");
                     _stream.Write(textBytes, 0, textBytes.Length);
+                    return true;
                 }
                 catch
                 {
                     // connection was forcibly closed - shut it down and wait for re-connection
-                    _disconnecting = true;
-                    _stream?.Close();
-                    _stream = null;
-                    _client?.Close();
-                    _client = null;
-                    _connected = false;
-                    _disconnecting = false;
-                    if (Type == MessengerType.Receive)
-                    {
-                        _listener.Start();
-                        _listening = true; // start listening again
-                    }
-                    OnDisconnected?.Invoke(this, new EventArgs());
+                    OnDisconnected?.Invoke(this, EventArgs.Empty);
+                    Close();
+                    Open();
+                    return false;
                 }
             }
+
+            return false;
         }
 
         protected virtual void Dispose(bool disposing)
@@ -289,7 +290,7 @@ namespace NanoMessenger
             {
                 if (disposing)
                 {
-                    _threadShouldDie = true;
+                    _terminateThreads = true;
                     _stream?.Dispose();
                     _client?.Dispose();
                 }
