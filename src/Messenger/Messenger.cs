@@ -16,8 +16,15 @@ namespace NanoMessenger
         public const string PING_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PING";
         public const string ACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ACK";
 
-        private Task _processMessagesTask;
-        private Task _pingTask;
+        public static void Wait(int milliseconds)
+        {
+            Thread.Sleep(milliseconds);
+            //DateTime start = DateTime.Now;
+            //while (DateTime.Now.Subtract(start).Milliseconds < milliseconds) Thread.Sleep(1); // wait, while not blocking anything
+        }
+
+        private Thread _processMessagesTask;
+        private Thread _pingTask;
 
         private TcpListener _listener;
         private TcpClient _client;
@@ -31,8 +38,6 @@ namespace NanoMessenger
 
         private byte[] _buffer = new byte[32768];
         private string _data = String.Empty;
-
-        private int _connectionAttempts;
 
         private List<QueueEntry> _messageQueue = new List<QueueEntry>();
 
@@ -61,10 +66,13 @@ namespace NanoMessenger
                     _listening = true;
                 }
 
-                if ((_processMessagesTask == null && _pingTask == null) || (_processMessagesTask.IsCompleted && _pingTask.IsCompleted))
+                if ((_processMessagesTask == null && _pingTask == null))
                 {
-                    _processMessagesTask = Task.Run(MessageLoop);
-                    _pingTask = Task.Run(PingLoop);
+                    _processMessagesTask = new Thread(MessageLoop);
+                    _pingTask = new Thread(PingLoop);
+
+                    _processMessagesTask.Start();
+                    _pingTask.Start();
                 }
             }
         }
@@ -125,10 +133,10 @@ namespace NanoMessenger
         {
             while (!_terminateThreads)
             {
-                if (!_disconnecting && PingEnabled)
+                if (PingEnabled)
                 {
                     Send(PING_MESSAGE); // if the connection goes down, Send() will notify clients and start the reconnect attempt
-                    Thread.Sleep(5000); // pause 5 seconds between PINGs
+                    Thread.Sleep(3000);
                 }
             }
         }
@@ -257,7 +265,6 @@ namespace NanoMessenger
                     throw; // anything else is fatal
                 }
             }
-
         }
 
         private bool Send(string text)
