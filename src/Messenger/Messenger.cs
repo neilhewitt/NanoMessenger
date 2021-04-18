@@ -12,6 +12,16 @@ namespace NanoMessenger
 {
     public class Messenger : IDisposable
     {
+        public static Messenger Transmitter(string nickname, string remoteHost, ushort port, int pingTimeoutInSeconds = 5)
+        {
+            return new Messenger(nickname, remoteHost, port, pingTimeoutInSeconds);
+        }
+
+        public static Messenger Receiver(string nickname, ushort port, int pingTimeoutInSeconds = 5)
+        {
+            return new Messenger(nickname, port, pingTimeoutInSeconds);
+        }
+
         public const string INTERNAL_MESSAGE_PREFIX = "$$";
         public const string PING_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PING";
         public const string PING_BACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PINGBACK";
@@ -373,19 +383,19 @@ namespace NanoMessenger
             GC.SuppressFinalize(this);
         }
 
-        public Messenger(string name, ushort port, int pingTimeOutInSeconds = 5) : this(name, null, port, null, pingTimeOutInSeconds)
+        private Messenger(string name, ushort port, int pingTimeOutInSeconds = 5) : this(name, null, port, pingTimeOutInSeconds)
         {
             Type = MessengerType.Receive;
         }
 
-        public Messenger(string name, IPAddress endPointAddress, ushort port, string hostName, int pingTimeOutInSeconds = 5)
+        private Messenger(string name, string remoteHost, ushort port, int pingTimeOutInSeconds = 5)
         {
             Name = name;
 
             LocalHostName = Dns.GetHostName();
             LocalAddress = Dns.GetHostAddresses(LocalHostName)[0];
-            RemoteHostName = hostName;
-            RemoteAddress = endPointAddress;
+            RemoteHostName = remoteHost;
+            RemoteAddress = Dns.GetHostAddresses(remoteHost)[0];
             Port = port;
             Type = MessengerType.Transmit;
             _pingTimeoutInSeconds = pingTimeOutInSeconds;
