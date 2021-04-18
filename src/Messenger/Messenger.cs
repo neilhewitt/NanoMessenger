@@ -16,13 +16,6 @@ namespace NanoMessenger
         public const string PING_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PING";
         public const string ACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ACK";
 
-        public static void Wait(int milliseconds)
-        {
-            Thread.Sleep(milliseconds);
-            //DateTime start = DateTime.Now;
-            //while (DateTime.Now.Subtract(start).Milliseconds < milliseconds) Thread.Sleep(1); // wait, while not blocking anything
-        }
-
         private Thread _processMessagesTask;
         private Thread _pingTask;
 
@@ -254,6 +247,10 @@ namespace NanoMessenger
                                 _data = message;
                             }
                         }
+                    }
+                    else
+                    {
+                        Thread.Sleep(100);
                     }
                 }
                 catch (IOException)
