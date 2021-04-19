@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -26,6 +27,7 @@ namespace NanoMessenger
         public const string PING_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PING";
         public const string PING_BACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PINGBACK";
         public const string ACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ACK";
+        public const string END_OF_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ENDS";
 
         private Thread _processMessagesTask;
         private Thread _pingTask;
@@ -156,11 +158,14 @@ namespace NanoMessenger
                     {
                         OnPing?.Invoke(this, RemoteHostName);
                         _pingBackPending = true;
-                        Send(PING_MESSAGE); // if the connection goes down, Send() will notify clients and start the reconnect attempt
-                        Task.Run(() => EnsurePingBack());
+                        Send(PING_MESSAGE); // PING should be responded to with PINGBACK or else the connection is down
+                        Task.Run(() => EnsurePingBack()); // we spin the wait method off onto a thread to avoid blocking
                     }
                 }
 
+                // waits 3 seconds between pings but in 6 segments of 500ms
+                // so that if we close down, this thread doesn't hold up app shutdown
+                // more than 500ms
                 int times = 0;
                 while (times++ < 6)
                 {
@@ -176,11 +181,12 @@ namespace NanoMessenger
         private void EnsurePingBack()
         {
             DateTime start = DateTime.Now;
+            
+            // there must be a more attractive way of doing this... wait until the pingback happens or timeout occurs
             while (!_pingBackReceived && DateTime.Now.Subtract(start).Seconds < _pingTimeoutInSeconds) ;
             
             if (!_pingBackReceived)
             {
-                // no return of ping
                 OnDisconnected?.Invoke(this, EventArgs.Empty);
                 Close();
                 Open();
@@ -193,10 +199,9 @@ namespace NanoMessenger
         {
             while (!_terminateThreads)
             {
-                // handle initial connection via listener or tcpClient
+                // handle initial connection via TcpListener or TcpClient
                 if (Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
                 {
-                    // only accept 1 client
                     if (_client == null)
                     {
                         OnConnecting?.Invoke(this, EventArgs.Empty);
@@ -211,7 +216,7 @@ namespace NanoMessenger
                     else
                     {
                         OnConnectionRetry?.Invoke(this, RemoteHostName);
-                        Thread.Sleep(1000); // wait for connections intermittently
+                        Thread.Sleep(1000); // let's not hog the CPU...
                     }
                 }
                 else if (Type == MessengerType.Transmit && _client == null)
@@ -220,11 +225,12 @@ namespace NanoMessenger
                     TcpClient client = new TcpClient();
                     try
                     {
-                        client.ConnectAsync(RemoteAddress, Port).Wait(10000);
+                        client.Connect(RemoteAddress, Port);
+                        //client.ConnectAsync(RemoteAddress, Port).Wait(10000);
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // couldn't connect yet... this is fine
+                        // couldn't connect yet... no problem, next time round will do fine
                     }
 
                     if (client.Connected)
@@ -240,13 +246,14 @@ namespace NanoMessenger
                     }
                 }
 
-                // get the stream once the client is connected
+                // get the stream to read from and write to, once the client is connected
                 if (_stream == null && _client != null && _client.Connected)
                 {
                     _stream = _client.GetStream();
                 }
 
-                // see if there's anything in the queue to send, and send it
+                // see if there's anything in the message queue to send, and send everything in one go
+                // the queue is really only there to provide resilience from disconnection
                 if (_stream != null && _client.Connected)
                 {
                     lock (_messageQueue)
@@ -282,38 +289,47 @@ namespace NanoMessenger
                         {
                             string message = $"{ _data }{ System.Text.Encoding.ASCII.GetString(_buffer, 0, i) }";
 
-                            // ignore incomplete messages until the whole message is available
-                            if (message.EndsWith("\n"))
+                            // max data in the read buffer is 32768 bytes which should be enough
+                            // but in case it isn't... messages will be chunked; message-end is noted with an escape sequence
+
+                            if (message.EndsWith(END_OF_MESSAGE))
                             {
-                                string cleanedMessage = message.Replace("\n", String.Empty);
+                                string cleanedMessage = message.Replace(END_OF_MESSAGE, String.Empty);
                                 if (cleanedMessage != String.Empty)
                                 {
-                                    if (cleanedMessage != PING_MESSAGE && cleanedMessage != PING_BACK_MESSAGE)
+                                    if (cleanedMessage == PING_MESSAGE)
+                                    {
+                                        // respond to the incoming ping with a pingback
+                                        Send($"{ PING_BACK_MESSAGE }");
+                                    }
+                                    else if (cleanedMessage == PING_BACK_MESSAGE)
+                                    {
+                                        _pingBackReceived = true; // this is a semaphore for the EnsurePingBack method above
+                                        OnPingBack?.Invoke(this, RemoteHostName);
+                                    }
+                                    else
                                     {
                                         if (cleanedMessage.StartsWith(ACK_MESSAGE))
                                         {
+                                            // clients can subscribe to OnReceiveAcknowledge to know when their messages
+                                            // got there - this is the limit of any auditing we do here
                                             OnReceiveAcknowledge?.Invoke(this, Guid.Parse(cleanedMessage.Substring(4)));
                                         }
                                         else
                                         {
                                             Message incomingMessage = Message.Parse(cleanedMessage);
+                                            
+                                            // all messages received are acknowledged back to the client
+                                            // in case the client needs to know when it's been delivered
                                             Send($"{ ACK_MESSAGE } { incomingMessage.ID }");
+                                            
                                             OnReceiveMessage?.Invoke(this, incomingMessage);
                                         }
                                     }
-                                    else if (cleanedMessage == PING_MESSAGE)
-                                    {
-                                        Send($"{ PING_BACK_MESSAGE }");
-                                    }
-                                    else if (cleanedMessage == PING_BACK_MESSAGE)
-                                    {
-                                        // we have the ping response
-                                        _pingBackReceived = true;
-                                        OnPingBack?.Invoke(this, RemoteHostName);
-                                    }
                                 }
 
-                                Array.Clear(_buffer, 0, _buffer.Length); // buffer must be cleared to avoid corruption
+                                // buffer must be cleared to avoid corruption if the next message is shorter than the last one
+                                Array.Clear(_buffer, 0, _buffer.Length); 
                                 _data = String.Empty;
                                 break;
                             }
@@ -335,7 +351,7 @@ namespace NanoMessenger
                 }
                 catch
                 {
-                    //throw; // anything else is fatal
+                    throw; // anything else is fatal
                 }
             }
         }
@@ -346,9 +362,9 @@ namespace NanoMessenger
             {
                 try
                 {
-                    if (text.StartsWith($"\\{ INTERNAL_MESSAGE_PREFIX }")) text = text.Substring(1); // handle escaped prefix
-                    byte[] textBytes = Encoding.ASCII.GetBytes($"{text}\n");
+                    byte[] textBytes = Encoding.ASCII.GetBytes($"{text}{ END_OF_MESSAGE }");
                     _stream.Write(textBytes, 0, textBytes.Length);
+                    Thread.Sleep(25); 
                     return true;
                 }
                 catch
@@ -395,10 +411,10 @@ namespace NanoMessenger
             LocalHostName = Dns.GetHostName();
             LocalAddress = Dns.GetHostAddresses(LocalHostName)[0];
             RemoteHostName = remoteHost;
-            RemoteAddress = Dns.GetHostAddresses(remoteHost)[0];
+            RemoteAddress = remoteHost == null ? null : Dns.GetHostAddresses(remoteHost)[0];
             Port = port;
             Type = MessengerType.Transmit;
             _pingTimeoutInSeconds = pingTimeOutInSeconds;
         }
     }
-}
+} 
