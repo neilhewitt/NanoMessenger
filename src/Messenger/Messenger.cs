@@ -199,159 +199,178 @@ namespace NanoMessenger
         {
             while (!_terminateThreads)
             {
-                // handle initial connection via TcpListener or TcpClient
-                if (Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
+                if (_client == null)
                 {
-                    if (_client == null)
-                    {
-                        OnConnecting?.Invoke(this, EventArgs.Empty);
-                        _client = _listener.AcceptTcpClient();
-                        RemoteAddress = ((IPEndPoint)_client.Client.RemoteEndPoint).Address;
-                        RemoteHostName = Dns.GetHostEntry(RemoteAddress).HostName;
-                        _listener.Stop();
-                        _listening = false;
-                        _connected = true;
-                        OnConnected?.Invoke(this, EventArgs.Empty);
-                    }
-                    else
-                    {
-                        OnConnectionRetry?.Invoke(this, RemoteHostName);
-                        Thread.Sleep(1000); // let's not hog the CPU...
-                    }
+                    ConnectIfReceiver();
+                    ConnectIfTransmitter();
                 }
-                else if (Type == MessengerType.Transmit && _client == null)
+                else
                 {
-                    OnConnecting?.Invoke(this, EventArgs.Empty);
-                    TcpClient client = new TcpClient();
+                    // messages are pulled from a queue, but the queue is really only there to provide resilience from disconnection;
+                    // all pending messages are sent now
+                    SendMessages();
+
                     try
                     {
-                        client.Connect(RemoteAddress, Port);
-                        //client.ConnectAsync(RemoteAddress, Port).Wait(10000);
+                        HandleIncomingMessages();
                     }
-                    catch (Exception ex)
+                    catch (IOException)
                     {
-                        // couldn't connect yet... no problem, next time round will do fine
+                        // probably the client closed down... let's start trying to reconnect
+                        Close();
+                        Open();
                     }
-
-                    if (client.Connected)
+                    catch
                     {
-                        _client = client;
-                        _connected = true;
-                        OnConnected?.Invoke(this, EventArgs.Empty);
-                    }
-                    else
-                    {
-                        OnConnectionRetry?.Invoke(this, RemoteHostName);
-                        Thread.Sleep(1000);
+                        throw; // anything else is fatal
                     }
                 }
+            }
+        }
 
-                // get the stream to read from and write to, once the client is connected
-                if (_stream == null && _client != null && _client.Connected)
+        private void ConnectIfReceiver()
+        {
+            if (Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
+            {
+                OnConnecting?.Invoke(this, EventArgs.Empty);
+                _client = _listener.AcceptTcpClient();
+                RemoteAddress = ((IPEndPoint)_client.Client.RemoteEndPoint).Address;
+                RemoteHostName = Dns.GetHostEntry(RemoteAddress).HostName;
+                _listener.Stop();
+                _listening = false;
+                _connected = true;
+                OnConnected?.Invoke(this, EventArgs.Empty);
+
+                GetStream();
+            }
+        }
+
+        private void ConnectIfTransmitter()
+        {
+            if (Type == MessengerType.Transmit)
+            {
+                OnConnecting?.Invoke(this, EventArgs.Empty);
+                TcpClient client = new TcpClient();
+                try
                 {
-                    _stream = _client.GetStream();
+                    client.Connect(RemoteAddress, Port);
+                }
+                catch (Exception ex)
+                {
+                    // couldn't connect yet... no problem, next time round we'll try again
                 }
 
-                // see if there's anything in the message queue to send, and send everything in one go
-                // the queue is really only there to provide resilience from disconnection
-                if (_stream != null && _client.Connected)
+                if (client.Connected)
                 {
-                    lock (_messageQueue)
+                    _client = client;
+                    _connected = true;
+                    OnConnected?.Invoke(this, EventArgs.Empty);
+
+                    GetStream();
+                }
+                else
+                {
+                    OnConnectionRetry?.Invoke(this, RemoteHostName);
+                    Thread.Sleep(1000);
+                }
+            }
+        }
+
+        private void GetStream()
+        {
+            if (_stream == null && _client != null && _client.Connected)
+            {
+                _stream = _client.GetStream();
+            }
+        }
+
+        private void SendMessages()
+        {
+            if (_stream != null && _client.Connected)
+            {
+
+                lock (_messageQueue)
+                {
+                    if (!_disconnecting && _messageQueue.Count > 0)
                     {
-                        if (!_disconnecting && _messageQueue.Count > 0)
+                        List<QueueEntry> sentMessages = new List<QueueEntry>();
+                        foreach (QueueEntry messageAndCallback in _messageQueue)
                         {
-                            List<QueueEntry> sentMessages = new List<QueueEntry>();
-                            foreach (QueueEntry messageAndCallback in _messageQueue)
+                            if (Send($"{ messageAndCallback.Message.ToString() }"))
                             {
-                                if (Send($"{ messageAndCallback.Message.ToString() }"))
-                                {
-                                    sentMessages.Add(messageAndCallback);
-                                }
-
-                                messageAndCallback.Callback?.Invoke($"{ messageAndCallback.Message.ToString() }");
+                                sentMessages.Add(messageAndCallback);
                             }
 
-                            foreach(QueueEntry entry in sentMessages)
-                            {
-                                _messageQueue.Remove(entry);
-                            }
+                            messageAndCallback.Callback?.Invoke($"{ messageAndCallback.Message.ToString() }");
+                        }
+
+                        foreach (QueueEntry entry in sentMessages)
+                        {
+                            _messageQueue.Remove(entry);
                         }
                     }
                 }
+            }
+        }
 
-                // now handle any message data sent to us
-                try
+        private void HandleIncomingMessages()
+        {
+            if (!_disconnecting && _stream != null && _stream.DataAvailable)
+            {
+                int i;
+                while ((i = _stream.Read(_buffer, 0, _buffer.Length)) != 0)
                 {
-                    if (!_disconnecting && _stream != null && _stream.DataAvailable)
+                    string message = $"{ _data }{ System.Text.Encoding.ASCII.GetString(_buffer, 0, i) }";
+
+                    // max data in the read buffer is 32768 bytes which should be enough
+                    // but in case it isn't... messages will be chunked; message-end is noted with an escape sequence
+
+                    if (message.EndsWith(END_OF_MESSAGE))
                     {
-                        int i;
-                        while ((i = _stream.Read(_buffer, 0, _buffer.Length)) != 0)
+                        string cleanedMessage = message.Replace(END_OF_MESSAGE, String.Empty);
+                        if (cleanedMessage != String.Empty)
                         {
-                            string message = $"{ _data }{ System.Text.Encoding.ASCII.GetString(_buffer, 0, i) }";
-
-                            // max data in the read buffer is 32768 bytes which should be enough
-                            // but in case it isn't... messages will be chunked; message-end is noted with an escape sequence
-
-                            if (message.EndsWith(END_OF_MESSAGE))
+                            if (cleanedMessage == PING_MESSAGE)
                             {
-                                string cleanedMessage = message.Replace(END_OF_MESSAGE, String.Empty);
-                                if (cleanedMessage != String.Empty)
-                                {
-                                    if (cleanedMessage == PING_MESSAGE)
-                                    {
-                                        // respond to the incoming ping with a pingback
-                                        Send($"{ PING_BACK_MESSAGE }");
-                                    }
-                                    else if (cleanedMessage == PING_BACK_MESSAGE)
-                                    {
-                                        _pingBackReceived = true; // this is a semaphore for the EnsurePingBack method above
-                                        OnPingBack?.Invoke(this, RemoteHostName);
-                                    }
-                                    else
-                                    {
-                                        if (cleanedMessage.StartsWith(ACK_MESSAGE))
-                                        {
-                                            // clients can subscribe to OnReceiveAcknowledge to know when their messages
-                                            // got there - this is the limit of any auditing we do here
-                                            OnReceiveAcknowledge?.Invoke(this, Guid.Parse(cleanedMessage.Substring(4)));
-                                        }
-                                        else
-                                        {
-                                            Message incomingMessage = Message.Parse(cleanedMessage);
-                                            
-                                            // all messages received are acknowledged back to the client
-                                            // in case the client needs to know when it's been delivered
-                                            Send($"{ ACK_MESSAGE } { incomingMessage.ID }");
-                                            
-                                            OnReceiveMessage?.Invoke(this, incomingMessage);
-                                        }
-                                    }
-                                }
-
-                                // buffer must be cleared to avoid corruption if the next message is shorter than the last one
-                                Array.Clear(_buffer, 0, _buffer.Length); 
-                                _data = String.Empty;
-                                break;
+                                // respond to the incoming ping with a pingback
+                                Send($"{ PING_BACK_MESSAGE }");
+                            }
+                            else if (cleanedMessage == PING_BACK_MESSAGE)
+                            {
+                                _pingBackReceived = true; // this is a semaphore for the EnsurePingBack method above
+                                OnPingBack?.Invoke(this, RemoteHostName);
                             }
                             else
                             {
-                                // store the current partial message for next time around the loop
-                                _data = message;
+                                if (cleanedMessage.StartsWith(ACK_MESSAGE))
+                                {
+                                    // clients can subscribe to OnReceiveAcknowledge to know when their messages
+                                    // got there - this is the limit of any auditing we do here
+                                    OnReceiveAcknowledge?.Invoke(this, Guid.Parse(cleanedMessage.Substring(4)));
+                                }
+                                else
+                                {
+                                    Message incomingMessage = Message.Parse(cleanedMessage);
+
+                                    // all messages received are acknowledged back to the client
+                                    // in case the client needs to know when it's been delivered
+                                    Send($"{ ACK_MESSAGE } { incomingMessage.ID }");
+
+                                    OnReceiveMessage?.Invoke(this, incomingMessage);
+                                }
                             }
                         }
+
+                        // buffer must be cleared to avoid corruption if the next message is shorter than the last one
+                        Array.Clear(_buffer, 0, _buffer.Length);
+                        _data = String.Empty;
+                        break;
                     }
                     else
                     {
-                        Thread.Sleep(100);
+                        // store the current partial message for next time around the loop
+                        _data = message;
                     }
-                }
-                catch (IOException)
-                {
-                    // probably the client closed down... this will get handled in the next loop
-                }
-                catch
-                {
-                    throw; // anything else is fatal
                 }
             }
         }
