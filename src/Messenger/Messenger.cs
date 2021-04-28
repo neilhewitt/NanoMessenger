@@ -346,7 +346,7 @@ namespace NanoMessenger
                                 {
                                     // clients can subscribe to OnReceiveAcknowledge to know when their messages
                                     // got there - this is the limit of any auditing we do here
-                                    OnReceiveAcknowledge?.Invoke(this, Guid.Parse(cleanedMessage.Substring(4)));
+                                    OnReceiveAcknowledge?.Invoke(this, Guid.Parse(cleanedMessage.Substring(5)));
                                 }
                                 else
                                 {
