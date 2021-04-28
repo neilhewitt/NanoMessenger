@@ -26,7 +26,7 @@ namespace NanoMessenger
         public const string INTERNAL_MESSAGE_PREFIX = "$$";
         public const string PING_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PING";
         public const string PING_BACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PINGBACK";
-        public const string ACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ACK";
+        public const string ACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ACK ";
         public const string END_OF_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ENDS";
 
         private Thread _processMessagesTask;
@@ -346,7 +346,7 @@ namespace NanoMessenger
                                 {
                                     // clients can subscribe to OnReceiveAcknowledge to know when their messages
                                     // got there - this is the limit of any auditing we do here
-                                    OnReceiveAcknowledge?.Invoke(this, Guid.Parse(cleanedMessage.Substring(5)));
+                                    OnReceiveAcknowledge?.Invoke(this, Guid.Parse(cleanedMessage.Substring(ACK_MESSAGE.Length)));
                                 }
                                 else
                                 {
@@ -354,7 +354,7 @@ namespace NanoMessenger
 
                                     // all messages received are acknowledged back to the client
                                     // in case the client needs to know when it's been delivered
-                                    Send($"{ ACK_MESSAGE } { incomingMessage.ID }");
+                                    Send($"{ ACK_MESSAGE }{ incomingMessage.ID }");
 
                                     OnReceiveMessage?.Invoke(this, incomingMessage);
                                 }
