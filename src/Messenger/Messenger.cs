@@ -29,6 +29,8 @@ namespace NanoMessenger
         public const string ACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ACK ";
         public const string END_OF_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ENDS";
 
+        public const int BUFFER_SIZE = 65536;
+
         private Thread _processMessagesTask;
         private Thread _pingTask;
 
@@ -41,12 +43,13 @@ namespace NanoMessenger
         private bool _disconnecting;
         private bool _listening;
         private bool _terminateThreads;
+        private bool _canPing;
         private bool _pingBackPending;
         private bool _pingBackReceived;
 
         private int _pingTimeoutInSeconds;
 
-        private byte[] _buffer = new byte[32768];
+        private byte[] _buffer = new byte[BUFFER_SIZE];
         private string _data = String.Empty;
 
         private List<QueueEntry> _messageQueue = new List<QueueEntry>();
@@ -60,6 +63,7 @@ namespace NanoMessenger
         public MessengerType Type { get; private set; }
         public bool Connected => _connected;
         public bool PingEnabled { get; set; } = false;
+        public int QueueLength => _messageQueue?.Count ?? -1;
 
         public event EventHandler<Message> OnReceiveMessage;
         public event EventHandler<Guid> OnReceiveAcknowledge;
@@ -96,18 +100,24 @@ namespace NanoMessenger
 
         public void Close()
         {
+            _canPing = false;
+            _disconnecting = true;
+            _connected = false;
+
             _terminateThreads = true;
             _processMessagesTask = null;
             _pingTask = null;
-            _disconnecting = true;
+
+            _listener?.Stop();
+            _listening = false;
+            _listener = null;
+
             _stream?.Close();
             _client?.Close();
             _client = null;
             _stream = null;
-            _listener?.Stop();
-            _listener = null;
+
             _disconnecting = false;
-            _connected = false;
         }
 
         public void QueueMessage(string text, Action<string> callbackAfterSent = null)
@@ -152,33 +162,24 @@ namespace NanoMessenger
         {
             while (!_terminateThreads)
             {
-                if (PingEnabled && RemoteAddress != null && _connected)
+                if (PingEnabled && RemoteAddress != null && _connected && _canPing)
                 {
                     if (!_pingBackPending)
                     {
                         OnPing?.Invoke(this, RemoteHostName);
                         _pingBackPending = true;
+                        _pingBackReceived = false;
                         Send(PING_MESSAGE); // PING should be responded to with PINGBACK or else the connection is down
-                        Task.Run(() => EnsurePingBack()); // we spin the wait method off onto a thread to avoid blocking
+                        AwaitPingBack();
+                        Thread.Sleep(3000);
                     }
                 }
 
-                // waits 3 seconds between pings but in 6 segments of 500ms
-                // so that if we close down, this thread doesn't hold up app shutdown
-                // more than 500ms
-                int times = 0;
-                while (times++ < 6)
-                {
-                    Thread.Sleep(500);
-                    if (_terminateThreads)
-                    {
-                        return;
-                    }
-                }
+                Thread.Sleep(1);
             }
         }
 
-        private void EnsurePingBack()
+        private void AwaitPingBack()
         {
             DateTime start = DateTime.Now;
             
@@ -206,13 +207,12 @@ namespace NanoMessenger
                 }
                 else
                 {
-                    // messages are pulled from a queue, but the queue is really only there to provide resilience from disconnection;
-                    // all pending messages are sent now
-                    SendMessages();
-
                     try
                     {
-                        HandleIncomingMessages();
+                        // generally there will only be one incoming message per go around the loop, but if the thread
+                        // runs too slowly then multiple messages may be in the stream unread, so this method
+                        // will handle multiple messages if necessary
+                        ReceiveIncomingMessages();
                     }
                     catch (IOException)
                     {
@@ -224,30 +224,42 @@ namespace NanoMessenger
                     {
                         throw; // anything else is fatal
                     }
+
+                    // messages are pulled from a queue, but the queue is really only there to provide resilience from disconnection;
+                    // only the top-most message is sent now, so the queue is now effectively a buffer; sending all messages at once
+                    // is faster but you risk overloading the receive buffer on the other end
+                    SendOutgoingMessage();
                 }
+
+                Thread.Sleep(1);
             }
         }
 
         private void ConnectIfReceiver()
         {
-            if (Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
+            if (!_disconnecting && Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
             {
                 OnConnecting?.Invoke(this, EventArgs.Empty);
+                
                 _client = _listener.AcceptTcpClient();
                 RemoteAddress = ((IPEndPoint)_client.Client.RemoteEndPoint).Address;
                 RemoteHostName = Dns.GetHostEntry(RemoteAddress).HostName;
+
                 _listener.Stop();
                 _listening = false;
+                _listener = null;
                 _connected = true;
+
                 OnConnected?.Invoke(this, EventArgs.Empty);
 
                 GetStream();
+                _canPing = true;
             }
         }
 
         private void ConnectIfTransmitter()
         {
-            if (Type == MessengerType.Transmit)
+            if (!_disconnecting && Type == MessengerType.Transmit)
             {
                 OnConnecting?.Invoke(this, EventArgs.Empty);
                 TcpClient client = new TcpClient();
@@ -260,13 +272,14 @@ namespace NanoMessenger
                     // couldn't connect yet... no problem, next time round we'll try again
                 }
 
-                if (client.Connected)
+                if (!_disconnecting && client.Connected)
                 {
                     _client = client;
                     _connected = true;
                     OnConnected?.Invoke(this, EventArgs.Empty);
 
                     GetStream();
+                    _canPing = true;
                 }
                 else
                 {
@@ -284,73 +297,69 @@ namespace NanoMessenger
             }
         }
 
-        private void SendMessages()
+        private void SendOutgoingMessage()
         {
             if (_stream != null && _client.Connected)
             {
-
                 lock (_messageQueue)
                 {
                     if (!_disconnecting && _messageQueue.Count > 0)
                     {
-                        List<QueueEntry> sentMessages = new List<QueueEntry>();
-                        foreach (QueueEntry messageAndCallback in _messageQueue)
-                        {
-                            if (Send($"{ messageAndCallback.Message.ToString() }"))
-                            {
-                                sentMessages.Add(messageAndCallback);
-                            }
-
-                            messageAndCallback.Callback?.Invoke($"{ messageAndCallback.Message.ToString() }");
-                        }
-
-                        foreach (QueueEntry entry in sentMessages)
-                        {
-                            _messageQueue.Remove(entry);
-                        }
+                        QueueEntry topOfQueue = _messageQueue.First();
+                        bool sent = Send($"{ topOfQueue.Message.ToString() }");
+                        if (sent) _messageQueue.RemoveAt(0);
                     }
                 }
             }
         }
 
-        private void HandleIncomingMessages()
+        private void ReceiveIncomingMessages()
         {
             if (!_disconnecting && _stream != null && _stream.DataAvailable)
             {
                 int i;
                 while ((i = _stream.Read(_buffer, 0, _buffer.Length)) != 0)
                 {
-                    string message = $"{ _data }{ System.Text.Encoding.ASCII.GetString(_buffer, 0, i) }";
+                    string data = $"{ _data }{ System.Text.Encoding.ASCII.GetString(_buffer, 0, i) }";
+                    Array.Clear(_buffer, 0, _buffer.Length);
 
-                    // max data in the read buffer is 32768 bytes which should be enough
-                    // but in case it isn't... messages will be chunked; message-end is noted with an escape sequence
+                    // max data in the read buffer is BUFFER_SIZE bytes which should be enough for most messages
+                    // but in case it isn't, messages will be chunked; each message-end is noted with an escape sequence
+                    // and if the data just read from the stream doesn't end with the end-of-message token, then
+                    // we'll stuff the data into a string field and concatenate the next set of data from the stream until
+                    // we have a complete set of messages available to process
 
-                    if (message.EndsWith(END_OF_MESSAGE))
+                    // this does mean that messages may be delayed processing while we wait, but they will all be handled 
+                    // eventually
+
+                    if (data.EndsWith(END_OF_MESSAGE))
                     {
-                        string cleanedMessage = message.Replace(END_OF_MESSAGE, String.Empty);
-                        if (cleanedMessage != String.Empty)
+                        // if the buffer is being filled quickly we may have more than one message pending, so we'll handle them all now
+                        string[] messages = data.Split(new string[] { END_OF_MESSAGE }, StringSplitOptions.RemoveEmptyEntries);
+
+                        foreach (string message in messages)
                         {
-                            if (cleanedMessage == PING_MESSAGE)
+                            if (message == PING_MESSAGE)
                             {
                                 // respond to the incoming ping with a pingback
                                 Send($"{ PING_BACK_MESSAGE }");
                             }
-                            else if (cleanedMessage == PING_BACK_MESSAGE)
+                            else if (message == PING_BACK_MESSAGE)
                             {
                                 _pingBackReceived = true; // this is a semaphore for the EnsurePingBack method above
                                 OnPingBack?.Invoke(this, RemoteHostName);
                             }
                             else
                             {
-                                if (cleanedMessage.StartsWith(ACK_MESSAGE))
+                                if (message.StartsWith(ACK_MESSAGE))
                                 {
                                     // clients can subscribe to OnReceiveAcknowledge to know when their messages
                                     // got there - this is the limit of any auditing we do here
-                                    OnReceiveAcknowledge?.Invoke(this, Guid.Parse(cleanedMessage.Substring(ACK_MESSAGE.Length)));
+                                    OnReceiveAcknowledge?.Invoke(this, Guid.Parse(message.Substring(ACK_MESSAGE.Length)));
                                 }
                                 else
                                 {
-                                    Message incomingMessage = Message.Parse(cleanedMessage);
+                                    Message incomingMessage = Message.Parse(message);
 
                                     // all messages received are acknowledged back to the client
                                     // in case the client needs to know when it's been delivered
@@ -361,15 +370,13 @@ namespace NanoMessenger
                             }
                         }
 
-                        // buffer must be cleared to avoid corruption if the next message is shorter than the last one
-                        Array.Clear(_buffer, 0, _buffer.Length);
                         _data = String.Empty;
                         break;
                     }
                     else
                     {
                         // store the current partial message for next time around the loop
-                        _data = message;
+                        _data = data;
                     }
                 }
             }
@@ -383,7 +390,6 @@ namespace NanoMessenger
                 {
                     byte[] textBytes = Encoding.ASCII.GetBytes($"{text}{ END_OF_MESSAGE }");
                     _stream.Write(textBytes, 0, textBytes.Length);
-                    Thread.Sleep(25); 
                     return true;
                 }
                 catch
