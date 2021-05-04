@@ -19,7 +19,7 @@ Once built, either add a dependency on the project in Visual Studio, or drop the
 
 ### If using a local NuGet package
 
-The NanoMessenger project is configured to build a .nupkg file on each build. This is **not** build-revved. You'll find it in the bin/debug or bin/release folders. If you copy this into a local NuGet folder / feed, you can add it to your project as a dependency, and if you're not making any source changes this can be a static dependency. Check the Releases in GitHub to see if there's a current release of the package for you to use rather than cloning the source. 
+The NanoMessenger project is configured to build a .nupkg file on each build. This is **not** build-revved. You'll find it in the bin/debug or bin/release folders. If you copy this into a local NuGet folder / feed, you can add it to your project as a dependency, and if you're not making any source changes this can be a static dependency. Check the Releases in GitHub to see if there's a current release of the package for you to use rather than cloning the source. I will release the package on nuget.org once I'm happy with the quality and I've gone to v1.0.
 
 ## The Messenger class
 
