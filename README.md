@@ -55,7 +55,7 @@ The core of the Messenger is the queue to which messages can be added for transm
 
 To add a message to the queue, call QueueMessage(). It takes a single string parameter containing the message to send. Messages may only be strings and are unstructured, though you can of course use your own format within the string to structure the data if you wish.
 
-    messenger.QueueMessage("Hello, world!");
+    Message message = messenger.QueueMessage("Hello, world!");
     
 Normally, this message will be sent immediately. If the connection is down, it will sit in the queue. If you add messages at a faster rate than the Messenger can send them, then the queue size will grow and messages will be sent one at a time in a strictly first-in, first-out order.
 
