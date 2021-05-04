@@ -123,7 +123,7 @@ namespace NanoMessenger
             _disconnecting = false;
         }
 
-        public void QueueMessage(string text, Action<string> callbackAfterSent = null)
+        public Message QueueMessage(string text, Action<string> callbackAfterSent = null)
         {
             lock (_messageQueue)
             {
@@ -132,8 +132,10 @@ namespace NanoMessenger
                     throw new ArgumentException($"Message begins with illegal sequence '{ INTERNAL_MESSAGE_PREFIX }' - use '\\{ INTERNAL_MESSAGE_PREFIX }' to escape.");
                 }
 
-                QueueEntry item = new QueueEntry(new Message(text), callbackAfterSent);
+                Message message = new Message(text);
+                QueueEntry item = new QueueEntry(message, callbackAfterSent);
                 _messageQueue.Add(item);
+                return message;
             }
         }
 
@@ -455,6 +457,7 @@ namespace NanoMessenger
             Port = port;
             Type = MessengerType.Transmit;
             _pingTimeoutInSeconds = pingTimeOutInSeconds;
+            PingEnabled = true;
         }
     }
 } 
