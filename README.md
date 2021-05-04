@@ -10,6 +10,7 @@ I use it for a number of client/server utilities that I wrote for my home cockpi
 
 **NanoMessenger is licensed under the BSD 3-clause license. See LICENSE for details.**
 
+
 ## Getting started
 
 ### If building from source
@@ -48,6 +49,47 @@ Two methods, Open() and Close(), are supplied. Open() begins the process of atte
 
 The Connected property indicates if the Messenger is currently connected, although this status is controlled solely by the ping mechanism and it's possible for a connection to be disconnected during the timeout period for the ping or if pinging is disabled.
 
+### Sending messages
+
+Having said that this is not a message queue (and it isn't in the *traditional* sense), the core part of the Messenger is the message queue to which messages can be added for transmission to the other end of the connection.
+
+To add a message to the queue, use the QueueMessage() method which takes a single string parameter containing the message. Messages may only be strings and are unstructured, although you can use your own format within the string to structure the data if you wish.
+
+    messenger.QueueMessage("Hello, world!");
+    
+Normally, this message will be sent immediately. If the connection is down, it will sit in the queue. If you add messages at a faster rate than the Messenger can send them, then the queue size will grow and messages will be sent one at a time in a strictly first-in, first-out order.
+
+The character sequence "$$" is an escape sequence for messages indicating (when placed at the start of the message) that this is a private system message. If you include this sequence in your message it will be escaped for transmittion and then un-escaped at the other end.
+
+Each message has the sequence "$$ENDS" added to it prior to transmission; this is used as an end-of-message token. It is removed from the received message. 
+
+The QueueMessage() method returns a Message object which is a reference to the object placed on the queue and includes the message text, a timestamp, and a GUID which uniquely identifies this message. If you need to track message delivery you will need to keep hold of this ID. 
+
+### Receiving messages
+
+To receive incoming messages, you should bind to the OnReceiveMessage event. This will supply the Message object for the message which includes its ID and timestamp (so you could measure delivery latency if you needed to).
+
+Remember that messages can be sent in both directions (receiver to transmitter and transmitter to receiver), and so both ends can receive messages. Generally, message transmission for your application will be transmitter -> receiver (hence the names) but for your application it may well be necessary to send messages back to the transmitter and there is no difference in how this is done. 
+
+When a message is received by either end, that end of the connection will send back an acknowledgement message. This is an *internal* message and you will **not** receive the OnReceiveMessage event when it arrives. If you need to verify that messages have been received you can subscribe to the OnReceiveAcknowledge event which will supply the message ID of the received message. 
+
+### Other events
+
+The Messenger class has several other events you can subscribe to:
+
+    OnConnecting // sent when the Messenger begins trying to connect / starts listening for connections
+    OnConnectionRetry // sent when the Messenger has failed to connect and is about to retry
+    OnConnected // sent when the Messenger connects in either direction
+    OnDisconnected // sent when the Messenger senses the other end of the connection has dropped
+    OnPing // sent when the Messenger sends a PING message
+    OnPingBack // sent when a return is received for a PING
+
+### Disposing the Messenger
+
+The Messenger uses several threads to ping and send / receive messages. When you call Close(), these threads are **not** terminated. Messenger implements IDisposable and you should either use the using() pattern or call Dispose() manually when you are done with a Messenger object.
+
+There is a finalizer which will call Dispose() if you forget to, but this only runs when the object is GCd and depending on your application this might not happen for a while, it might keep your application open in the background. So DON'T FORGET TO DISPOSE!
 
 
+That's about it... if in doubt, read the code :-)
 
