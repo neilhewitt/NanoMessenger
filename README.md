@@ -47,7 +47,7 @@ However, there are circumstances where you might not want to have the pings enab
 
 Two methods, Open() and Close(), are supplied. Open() begins the process of attempting to connect. Close() closes down the connection but does not dispose any threads or resources, and the connection can be re-opened by calling Open() again. 
 
-The Connected property indicates if the Messenger is currently connected, although this status is controlled solely by the ping mechanism and it's possible for a connection to be disconnected during the timeout period for the ping or if pinging is disabled.
+The Connected property indicates if the Messenger is currently connected. This status is controlled solely by the ping mechanism and it's possible for a connection to have disconnected during the timeout period for the ping (or if pinging is disabled) while Connected remains true. 
 
 #### Sending messages
 
