@@ -90,6 +90,41 @@ The Messenger uses several threads to ping and send / receive messages. When you
 
 There is a finalizer which will call Dispose() if you forget to, but this only runs when the object is GCd and depending on your application this might not happen for a while, it might keep your application open in the background. So DON'T FORGET TO DISPOSE!
 
+## Sample code
 
-That's about it... if in doubt, read the code :-)
+Below is a simple program that opens a transmitter and receiver on the same machine (note the loopback address) and sends messages in one direction as fast as it can while displaying the incoming acknowledgements and pings / ping backs. If you want to see it actually progressing then just uncomment the Thread.Sleep line.
 
+using System;
+using System.Threading;
+using NanoMessenger;
+
+    namespace MessengerTest
+    {
+        class Program
+        {
+            static void Main(string[] args)
+            {
+                Messenger receiver = Messenger.Receiver("Receive", 16384);
+                Messenger transmitter = Messenger.Transmitter("Transmit", "127.0.0.1", 16384);
+
+                receiver.OnReceiveMessage += (sender, message) => { Console.ForegroundColor = ConsoleColor.Green; Console.WriteLine($"Message: { message.Text }"); };
+                receiver.OnPing += (sender, e) => { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine("Receiver ping..."); };
+                receiver.OnPingBack += (sender, e) => { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine("Receiver pingback."); };
+                receiver.Open();
+
+                transmitter.OnReceiveAcknowledge += (sender, id) => { Console.ForegroundColor = ConsoleColor.Yellow; Console.WriteLine($"Acknowledge: { id.ToString() }"); };
+                transmitter.OnPing += (sender, e) => { Console.ForegroundColor = ConsoleColor.Blue; Console.WriteLine("Transmitter ping..."); };
+                transmitter.OnPingBack += (sender, e) => { Console.ForegroundColor = ConsoleColor.Blue; Console.WriteLine("Transmitter pingback."); };
+                transmitter.Open();
+
+                while (true)
+                {
+                    if (receiver.Connected && transmitter.Connected)
+                    {
+                        transmitter.QueueMessage("This is a test message.");
+                        Thread.Sleep(500);
+                    }
+                }
+            }
+        }
+    }
