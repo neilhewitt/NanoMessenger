@@ -59,7 +59,7 @@ To add a message to the queue, call QueueMessage(). It takes a single string par
     
 Normally, this message will be sent immediately. If the connection is down, it will sit in the queue. If you add messages at a faster rate than the Messenger can send them, then the queue size will grow and messages will be sent one at a time in a strictly first-in, first-out order.
 
-The character sequence "$$" is an escape sequence for messages indicating (when placed at the start of the message) that this is a private system message. If you include this sequence in your message it will be escaped for transmittion and then un-escaped at the other end.
+The character sequence "$$" is an escape sequence for messages indicating (when placed at the start of the message) that this is a private system message. If you include this sequence in your message it will be escaped for transmission and then un-escaped at the other end.
 
 Each message has the sequence "$$ENDS" added to it prior to transmission; this is used as an end-of-message token. It is removed from the received message. 
 
