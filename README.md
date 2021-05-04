@@ -12,23 +12,23 @@ I use it for a number of client/server utilities that I wrote for my home cockpi
 
 ---
 
-## Getting started
+### Getting started
 
-### If building from source
+#### If building from source
 
 Once built, either add a dependency on the project in Visual Studio, or drop the output files into a folder and reference the DLL directly. At present it's not possible to compile NanoMessenger into a single DLL.
 
-### If using a local NuGet package
+#### If using a local NuGet package
 
 The NanoMessenger project is configured to build a .nupkg file on each build. This is **not** build-revved. You'll find it in the bin/debug or bin/release folders. If you copy this into a local NuGet folder / feed, you can add it to your project as a dependency, and if you're not making any source changes this can be a static dependency. Check the Releases in GitHub to see if there's a current release of the package for you to use rather than cloning the source. I will release the package on nuget.org once I'm happy with the quality and I've gone to v1.0.
 
-## The Messenger class
+### The Messenger class
 
 The only usable class in this library is the Messenger class. The constructors are private so you must use the static factory methods Messenger.Receiver() or Messenger.Transmitter(), for the client and server instances respectively.
 
 The only difference between a Receiver and a Transmitter is that a Transmitter actively attempts to connect to the destination IP address specified, whereas the Receiver will set up a TcpListener and wait to be connected. Once connected, you can pass messages in either direction. 
 
-Examples:
+####Examples:
 
     Messenger server = Messenger.Transmitter("Nickname for connection", "CLIENT_PC_NAME", 16384, 10);
   
@@ -38,19 +38,19 @@ You specify a nickname for the connection (this can be handy if you're running m
   
 The receiver factory method needs no IP address but otherwise the parameters are identical.
 
-### Pings
+#### Pings
 
 By default the ping function is always enabled, and pings are sent by each end of the connection every 3 seconds (this value is not currently configurable, although the timeout for the ping response, after which the connection will be deemed to have dropped, needs to be specified (see above). When a connection drop happens the Messenger on each end will tidy up and close down the connection and then begin trying to re-connect. 
 
 However, there are circumstances where you might not want to have the pings enabled (for example if debugging) as they run on a separate thread and will not stop at the breakpoint. So you can set the PingEnabled property to false. You should not do this in a deployed context as otherwise the Messenger will go on attempting to send and receive messages until the underlying TcpClient becomes aware that it is disconnected (which may never happen).
 
-### Opening and Closing the Messenger
+#### Opening and Closing the Messenger
 
 Two methods, Open() and Close(), are supplied. Open() begins the process of attempting to connect. Close() closes down the connection but does not dispose any threads or resources, and the connection can be re-opened by calling Open() again. 
 
 The Connected property indicates if the Messenger is currently connected, although this status is controlled solely by the ping mechanism and it's possible for a connection to be disconnected during the timeout period for the ping or if pinging is disabled.
 
-### Sending messages
+#### Sending messages
 
 Having said that this is not a message queue (and it isn't in the *traditional* sense), the core part of the Messenger is the message queue to which messages can be added for transmission to the other end of the connection.
 
@@ -66,7 +66,7 @@ Each message has the sequence "$$ENDS" added to it prior to transmission; this i
 
 The QueueMessage() method returns a Message object which is a reference to the object placed on the queue and includes the message text, a timestamp, and a GUID which uniquely identifies this message. If you need to track message delivery you will need to keep hold of this ID. 
 
-### Receiving messages
+#### Receiving messages
 
 To receive incoming messages, you should bind to the OnReceiveMessage event. This will supply the Message object for the message which includes its ID and timestamp (so you could measure delivery latency if you needed to).
 
@@ -74,7 +74,7 @@ Remember that messages can be sent in both directions (receiver to transmitter a
 
 When a message is received by either end, that end of the connection will send back an acknowledgement message. This is an *internal* message and you will **not** receive the OnReceiveMessage event when it arrives. If you need to verify that messages have been received you can subscribe to the OnReceiveAcknowledge event which will supply the message ID of the received message. 
 
-### Other events
+#### Other events
 
 The Messenger class has several other events you can subscribe to:
 
@@ -85,7 +85,7 @@ The Messenger class has several other events you can subscribe to:
     OnPing // sent when the Messenger sends a PING message
     OnPingBack // sent when a return is received for a PING
 
-### Disposing the Messenger
+#### Disposing the Messenger
 
 The Messenger uses several threads to ping and send / receive messages. When you call Close(), these threads are **not** terminated. Messenger implements IDisposable and you should either use the using() pattern or call Dispose() manually when you are done with a Messenger object.
 
