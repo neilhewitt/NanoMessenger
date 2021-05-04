@@ -53,7 +53,7 @@ The Connected property indicates if the Messenger is currently connected. This s
 
 The core part of the Messenger is the message queue to which messages can be added for transmission to the other end of the connection.
 
-To add a message to the queue call the QueueMessage() method, which takes a single parameter containing the message to send. Messages may only be strings and are unstructured, though you can of course use your own format within the string to structure the data if you wish.
+To add a message to the queue, call QueueMessage(), which takes a single parameter containing the message to send. Messages may only be strings and are unstructured, though you can of course use your own format within the string to structure the data if you wish.
 
     messenger.QueueMessage("Hello, world!");
     
