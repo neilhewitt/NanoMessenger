@@ -27,7 +27,7 @@ The only usable class in this library is the Messenger class. The constructors a
 
 The only difference between a Receiver and a Transmitter is that a Transmitter actively attempts to connect to the destination IP address specified, whereas the Receiver will set up a TcpListener and wait to be connected. Once connected, you can pass messages in either direction. 
 
-####Examples:
+#### Examples:
 
     Messenger server = Messenger.Transmitter("Nickname for connection", "CLIENT_PC_NAME", 16384, 10);
   
