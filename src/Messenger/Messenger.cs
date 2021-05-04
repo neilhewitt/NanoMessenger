@@ -46,6 +46,7 @@ namespace NanoMessenger
         private bool _canPing;
         private bool _pingBackPending;
         private bool _pingBackReceived;
+        private bool _paused;
 
         private int _pingTimeoutInSeconds;
 
@@ -95,18 +96,20 @@ namespace NanoMessenger
                     _processMessagesTask.Start();
                     _pingTask.Start();
                 }
+
+                _paused = false;
             }
         }
 
+        // don't forget that this does not stop the threads, so when you're done with 
+        // the Messenger instance you must call Dispose() (or use the using() pattern)
         public void Close()
         {
-            _canPing = false;
             _disconnecting = true;
-            _connected = false;
 
-            _terminateThreads = true;
-            _processMessagesTask = null;
-            _pingTask = null;
+            _paused = true;
+            _canPing = false;
+            _connected = false;
 
             _listener?.Stop();
             _listening = false;
@@ -158,11 +161,31 @@ namespace NanoMessenger
             }
         }
 
+        public void Dispose()
+        {
+            _terminateThreads = true;
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    Close();
+                }
+
+                _disposed = true;
+            }
+        }
+
         private void PingLoop()
         {
             while (!_terminateThreads)
             {
-                if (PingEnabled && RemoteAddress != null && _connected && _canPing)
+                if (!_paused && PingEnabled && RemoteAddress != null && _connected && _canPing)
                 {
                     if (!_pingBackPending)
                     {
@@ -200,38 +223,41 @@ namespace NanoMessenger
         {
             while (!_terminateThreads)
             {
-                if (_client == null)
+                if (!_paused)
                 {
-                    ConnectIfReceiver();
-                    ConnectIfTransmitter();
-                }
-                else
-                {
-                    try
+                    if (_client == null)
                     {
-                        // generally there will only be one incoming message per go around the loop, but if the thread
-                        // runs too slowly then multiple messages may be in the stream unread, so this method
-                        // will handle multiple messages if necessary
-                        ReceiveIncomingMessages();
+                        ConnectIfReceiver();
+                        ConnectIfTransmitter();
                     }
-                    catch (IOException)
+                    else
                     {
-                        // probably the client closed down... let's start trying to reconnect
-                        Close();
-                        Open();
-                    }
-                    catch
-                    {
-                        throw; // anything else is fatal
+                        try
+                        {
+                            // generally there will only be one incoming message per go around the loop, but if the thread
+                            // runs too slowly then multiple messages may be in the stream unread, so this method
+                            // will handle multiple messages if necessary
+                            ReceiveIncomingMessages();
+                        }
+                        catch (IOException)
+                        {
+                            // probably the client closed down... let's start trying to reconnect
+                            Close();
+                            Open();
+                        }
+                        catch
+                        {
+                            throw; // anything else is fatal
+                        }
+
+                        // messages are pulled from a queue, but the queue is really only there to provide resilience from disconnection;
+                        // only the top-most message is sent now, so the queue is now effectively a buffer; sending all messages at once
+                        // is faster but you risk overloading the receive buffer on the other end
+                        SendOutgoingMessage();
                     }
 
-                    // messages are pulled from a queue, but the queue is really only there to provide resilience from disconnection;
-                    // only the top-most message is sent now, so the queue is now effectively a buffer; sending all messages at once
-                    // is faster but you risk overloading the receive buffer on the other end
-                    SendOutgoingMessage();
+                    Thread.Sleep(1);
                 }
-
-                Thread.Sleep(1);
             }
         }
 
@@ -405,23 +431,12 @@ namespace NanoMessenger
             return false;
         }
 
-        protected virtual void Dispose(bool disposing)
+        // this is only here as a fail-safe for those who don't remember to call Dispose()
+        ~Messenger()
         {
-            if (!_disposed)
-            {
-                if (disposing)
-                {
-                    Close();
-                }
+            Debug.Fail("Your code does not Dispose this object correctly. Please ensure Dispose is called before you finish using the class instance.");
+            Dispose(false);
 
-                _disposed = true;
-            }
-        }
-
-        void IDisposable.Dispose()
-        {
-            Dispose(disposing: true);
-            GC.SuppressFinalize(this);
         }
 
         private Messenger(string name, ushort port, int pingTimeOutInSeconds = 5) : this(name, null, port, pingTimeOutInSeconds)
