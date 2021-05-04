@@ -124,7 +124,7 @@ I'm acutely aware that having just told you to DISPOSE!, this code does not call
                     if (receiver.Connected && transmitter.Connected)
                     {
                         transmitter.QueueMessage("This is a test message.");
-                        Thread.Sleep(500);
+                        //Thread.Sleep(500);
                     }
                 }
             }
