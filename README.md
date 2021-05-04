@@ -2,18 +2,18 @@
 
 A tiny messaging library that's almost no library at all. Use the **Messenger** class at both ends of the connection to pass messages between two endpoints with an intermediate queue for disconnected scenarios. Queued messages are only delivered if the dropped end of the conversation resumes during the current session, and all queued messages will then be delivered *before* any new message is sent. 
 
-Note: This is not MSMQ. Or MQSeries. Or a message queue at all. It's a simple TCP/IP pipe between two network endpoints that passes contextless messages in plain text with a queue that accumulates messages if the connection is down, and sends them if and when it comes up again. Message delivery is not guaranteed under any circumstances and messages, once sent, cannot be re-played. 
+Note: This is not MSMQ. Or MQSeries. It's a simple TCP/IP pipe between two network endpoints that passes contextless messages in plain text with a queue that accumulates messages if the connection is down, and sends them if and when it comes up again. Message delivery is not guaranteed under any circumstances and messages, once sent, cannot be replayed. 
 
 I use it for a number of client/server utilities that I wrote for my home cockpit project. If it's useful to you, by all means use it. 
 
-*Note: the project targets .NET Standard 2.0 and will not be pushed to .NET Standard 2.1, as I need it to work with .NET Framework 4.x projects as well as .NET Core / 5.0.*
+*Note: the project targets .NET Standard 2.0 and will not be updated to .NET Standard 2.1, as I need it to work with .NET Framework 4.x projects as well as .NET Core / 5.0.*
 
 **NanoMessenger is licensed under the BSD 3-clause license. See LICENSE for details.**  
 
 
 ## Getting started
 
-#### If building from source
+#### Building from source
 
 Once built, either add a dependency on the project in Visual Studio, or drop the output files into a folder and reference the DLL directly. At present it's not possible to compile NanoMessenger into a single DLL.
 
