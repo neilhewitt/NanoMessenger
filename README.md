@@ -47,13 +47,13 @@ However, there are circumstances where you might not want to have the pings enab
 
 Two methods, Open() and Close(), are supplied. Open() begins the process of attempting to connect. Close() closes down the connection but does not dispose any threads or resources, and the connection can be re-opened by calling Open() again. 
 
-The Connected property indicates if the Messenger is currently connected. This status is controlled solely by the ping mechanism and it's possible for a connection to have disconnected during the timeout period for the ping (or if pinging is disabled) while Connected remains true. 
+The Connected property indicates if the Messenger is currently connected. This status is controlled by the ping mechanism, so it's possible for a connection to have disconnected during the timeout period for the ping (or if pinging is disabled) while Connected remains true. You should account for this latency in your application. 
 
 #### Sending messages
 
-Having said that this is not a message queue (and it isn't in the *traditional* sense), the core part of the Messenger is the message queue to which messages can be added for transmission to the other end of the connection.
+The core part of the Messenger is the message queue to which messages can be added for transmission to the other end of the connection.
 
-To add a message to the queue, use the QueueMessage() method which takes a single string parameter containing the message. Messages may only be strings and are unstructured, although you can use your own format within the string to structure the data if you wish.
+To add a message to the queue call the QueueMessage() method, which takes a single parameter containing the message to send. Messages may only be strings and are unstructured, though you can of course use your own format within the string to structure the data if you wish.
 
     messenger.QueueMessage("Hello, world!");
     
