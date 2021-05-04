@@ -15,7 +15,7 @@ I use it for a number of client/server utilities that I wrote for my home cockpi
 
 #### Building from source
 
-Once built, either add a dependency on the project in Visual Studio, or drop the output files into a folder and reference the DLL directly. At present it's not possible to compile NanoMessenger into a single DLL.
+Once built, either add a dependency on the project in Visual Studio, or drop the output files into a folder and reference the DLL directly.
 
 #### If using a local NuGet package
 
