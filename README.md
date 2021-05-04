@@ -51,7 +51,7 @@ The Connected property indicates if the Messenger is currently connected. This s
 
 #### Sending messages
 
-The core part of the Messenger is the message queue to which messages can be added for transmission to the other end of the connection.
+The core of the Messenger is the queue to which messages can be added for transmission to the other end of the connection.
 
 To add a message to the queue, call QueueMessage(). It takes a single string parameter containing the message to send. Messages may only be strings and are unstructured, though you can of course use your own format within the string to structure the data if you wish.
 
