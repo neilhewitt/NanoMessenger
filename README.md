@@ -61,7 +61,7 @@ Normally, this message will be sent immediately. If the connection is down, it w
 
 The character sequence "$$" is an escape sequence for messages indicating (when placed at the start of the message) that this is a private system message. If you include this sequence in your message it will be escaped for transmission and then un-escaped at the other end.
 
-Each message has the sequence "$$ENDS" added to it prior to transmission; this is used as an end-of-message token. It is removed from the received message. 
+Each message has the sequence "$$ENDS" appended to it prior to transmission; this is used as an end-of-message token. It is removed from the received message. 
 
 The QueueMessage() method returns a Message object which is a reference to the object placed on the queue and includes the message text, a timestamp, and a GUID which uniquely identifies this message. If you need to track message delivery you will need to keep hold of this ID. 
 
