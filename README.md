@@ -12,7 +12,7 @@ I use it for a number of client/server utilities that I wrote for my home cockpi
 
 ---
 
-### Getting started
+## Getting started
 
 #### If building from source
 
