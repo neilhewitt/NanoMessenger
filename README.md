@@ -9,9 +9,9 @@ I use it for a number of client/server utilities that I wrote for my home cockpi
 *Note: the project targets .NET Standard 2.0 and will not be pushed to .NET Standard 2.1, as I need it to work with .NET Framework 4.x projects as well as .NET Core / 5.0.*
 
 **NanoMessenger is licensed under the BSD 3-clause license. See LICENSE for details.**  
-  
-  
-  
+
+---
+
 ## Getting started
 
 ### If building from source
