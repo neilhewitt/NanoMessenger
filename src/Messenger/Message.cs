@@ -12,7 +12,11 @@ namespace NanoMessenger
             if (!Guid.TryParse(messageParts[0], out Guid id)) ThrowInvalid();
             if (!DateTime.TryParse(messageParts[1], out DateTime dateStamp)) ThrowInvalid();
 
-            Message message = new Message(messageParts[2]);
+            string messageText = messageParts[2];
+            messageText = messageText.Replace($"\\{ Messenger.INTERNAL_MESSAGE_TOKEN }", Messenger.INTERNAL_MESSAGE_TOKEN);
+            messageText = messageText.Replace(Messenger.PIPE_ESCAPE, "|");
+
+            Message message = new Message(messageText);
             message.DateStamp = dateStamp;
             message.ID = id;
 
@@ -30,7 +34,10 @@ namespace NanoMessenger
 
         public override string ToString()
         {
-            return $"{ ID.ToString() }|{ DateStamp.ToString() }|{ Text }";
+            string messageText = Text;
+            messageText = messageText.Replace(Messenger.INTERNAL_MESSAGE_TOKEN, $"\\{ Messenger.INTERNAL_MESSAGE_TOKEN }");
+            messageText = messageText.Replace("|", Messenger.PIPE_ESCAPE);
+            return $"{ ID.ToString() }|{ DateStamp.ToString() }|{ messageText }";
         }
 
         public Message(string messageText)

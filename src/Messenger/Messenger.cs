@@ -7,7 +7,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace NanoMessenger
 {
@@ -23,11 +22,12 @@ namespace NanoMessenger
             return new Messenger(nickname, port, pingTimeoutInSeconds);
         }
 
-        public const string INTERNAL_MESSAGE_PREFIX = "$$";
-        public const string PING_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PING";
-        public const string PING_BACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "PINGBACK";
-        public const string ACK_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ACK ";
-        public const string END_OF_MESSAGE = INTERNAL_MESSAGE_PREFIX + "ENDS";
+        public const string INTERNAL_MESSAGE_TOKEN = "$$";
+        public const string PING_MESSAGE = INTERNAL_MESSAGE_TOKEN + "PING";
+        public const string PING_BACK_MESSAGE = INTERNAL_MESSAGE_TOKEN + "PINGBACK";
+        public const string ACK_MESSAGE = INTERNAL_MESSAGE_TOKEN + "ACK ";
+        public const string END_OF_MESSAGE = INTERNAL_MESSAGE_TOKEN + "ENDS";
+        public const string PIPE_ESCAPE = INTERNAL_MESSAGE_TOKEN + "PIPE";
 
         public const int BUFFER_SIZE = 65536;
 
@@ -127,11 +127,6 @@ namespace NanoMessenger
         {
             lock (_messageQueue)
             {
-                if (text.StartsWith(INTERNAL_MESSAGE_PREFIX))
-                {
-                    throw new ArgumentException($"Message begins with illegal sequence '{ INTERNAL_MESSAGE_PREFIX }' - use '\\{ INTERNAL_MESSAGE_PREFIX }' to escape.");
-                }
-
                 Message message = new Message(text);
                 QueueEntry item = new QueueEntry(message, callbackAfterSent);
                 _messageQueue.Add(item);
@@ -268,10 +263,17 @@ namespace NanoMessenger
             if (!_disconnecting && Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
             {
                 OnConnecting?.Invoke(this, EventArgs.Empty);
-                
                 _client = _listener.AcceptTcpClient();
-                RemoteAddress = ((IPEndPoint)_client.Client.RemoteEndPoint).Address;
-                RemoteHostName = Dns.GetHostEntry(RemoteAddress).HostName;
+                
+                try
+                {
+                    RemoteAddress = ((IPEndPoint)_client.Client.RemoteEndPoint).Address;
+                    RemoteHostName = Dns.GetHostEntry(RemoteAddress).HostName;
+                }
+                catch
+                {
+                    // these values are for reference only... if DNS breaks, not a big deal
+                }
 
                 _listener.Stop();
                 _listening = false;
