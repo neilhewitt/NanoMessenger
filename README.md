@@ -15,7 +15,7 @@ I use it for a number of client/server utilities that I wrote for my home cockpi
 
 #### Building from source
 
-Once built, either add a dependency on the project in Visual Studio, or drop the output files into a folder and reference the DLL directly. At present it's not possible to compile NanoMessenger into a single DLL.
+Once built, either add a dependency on the project in Visual Studio, or drop the output files into a folder and reference the DLL directly.
 
 #### If using a local NuGet package
 
@@ -94,9 +94,11 @@ There is a finalizer which will call Dispose() if you forget to, but this only r
 
 Below is a simple program that opens a transmitter and receiver on the same machine (note the loopback address) and sends messages in one direction as fast as it can while displaying the incoming acknowledgements and pings / ping backs. If you want to see it actually progressing then just uncomment the Thread.Sleep line.
 
-using System;
-using System.Threading;
-using NanoMessenger;
+I'm acutely aware that having just told you to DISPOSE!, this code does not call Dispose. But it's a forever loop which is interrupted when you close the app, and as it's a console app everything will close and the finalizer will get called immediately. So, you know, no problem there.
+
+    using System;
+    using System.Threading;
+    using NanoMessenger;
 
     namespace MessengerTest
     {
@@ -122,7 +124,7 @@ using NanoMessenger;
                     if (receiver.Connected && transmitter.Connected)
                     {
                         transmitter.QueueMessage("This is a test message.");
-                        Thread.Sleep(500);
+                        //Thread.Sleep(500);
                     }
                 }
             }
