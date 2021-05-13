@@ -12,14 +12,14 @@ namespace NanoMessenger
 {
     public class Messenger : IDisposable
     {
-        public static Messenger Transmitter(string nickname, string remoteHost, ushort port, int pingTimeoutInSeconds = 5)
+        public static Messenger Transmitter(string nickname, string remoteHost, ushort port, int pingIntervalInSeconds = 3, int pingTimeoutInSeconds = 5, int maxConnectionRetries = 5)
         {
-            return new Messenger(nickname, remoteHost, port, pingTimeoutInSeconds);
+            return new Messenger(nickname, remoteHost, port, pingIntervalInSeconds, pingTimeoutInSeconds, maxConnectionRetries);
         }
 
-        public static Messenger Receiver(string nickname, ushort port, int pingTimeoutInSeconds = 5)
+        public static Messenger Receiver(string nickname, ushort port, int pingIntervalInSeconds = 3, int pingTimeoutInSeconds = 5, int listenTimeoutInSeconds = 0)
         {
-            return new Messenger(nickname, port, pingTimeoutInSeconds);
+            return new Messenger(nickname, port, pingIntervalInSeconds, pingTimeoutInSeconds, listenTimeoutInSeconds);
         }
 
         public const string INTERNAL_MESSAGE_TOKEN = "$$";
@@ -49,6 +49,11 @@ namespace NanoMessenger
         private bool _paused;
 
         private int _pingTimeoutInSeconds;
+        private int _pingIntervalInSeconds;
+        private int _listenTimeoutInSeconds;
+        private int _maxConnectionRetries;
+        private int _connectionRetriesSoFar;
+        private DateTime _startedListening;
 
         private byte[] _buffer = new byte[BUFFER_SIZE];
         private string _data = String.Empty;
@@ -63,7 +68,10 @@ namespace NanoMessenger
         public ushort Port { get; private set; }
         public MessengerType Type { get; private set; }
         public bool Connected => _connected;
+        public bool Closed => !_connected && _paused && _listener == null && _client == null && _stream == null;
         public bool PingEnabled { get; set; } = false;
+        public int PingTimeoutInSeconds => _pingTimeoutInSeconds;
+        public int PingIntervalInSeconds => _pingIntervalInSeconds;
         public int QueueLength => _messageQueue?.Count ?? -1;
 
         public event EventHandler<Message> OnReceiveMessage;
@@ -74,6 +82,8 @@ namespace NanoMessenger
         public event EventHandler OnDisconnected;
         public event EventHandler<string> OnPing;
         public event EventHandler<string> OnPingBack;
+        public event EventHandler OnListenerTimedOut;
+        public event EventHandler OnConnectionRetriesExceeded;
 
         public void Open()
         {
@@ -81,6 +91,7 @@ namespace NanoMessenger
             {
                 if (Type == MessengerType.Receive)
                 {
+                    _startedListening = DateTime.Now;
                     _listener = new TcpListener(IPAddress.Any, Port);
                     _listener.Start();
                     _listening = true;
@@ -264,7 +275,7 @@ namespace NanoMessenger
             {
                 OnConnecting?.Invoke(this, EventArgs.Empty);
                 _client = _listener.AcceptTcpClient();
-                
+
                 try
                 {
                     RemoteAddress = ((IPEndPoint)_client.Client.RemoteEndPoint).Address;
@@ -284,6 +295,13 @@ namespace NanoMessenger
 
                 GetStream();
                 _canPing = true;
+            }
+
+            // can specify a max time to wait for connections... if exceeded, close down and notify clients subscribed
+            if (_listenTimeoutInSeconds > 0 && DateTime.Now.Subtract(_startedListening).TotalSeconds > _listenTimeoutInSeconds)
+            {
+                Close();
+                OnListenerTimedOut?.Invoke(this, EventArgs.Empty);
             }
         }
 
@@ -313,8 +331,17 @@ namespace NanoMessenger
                 }
                 else
                 {
-                    OnConnectionRetry?.Invoke(this, RemoteHostName);
-                    Thread.Sleep(1000);
+                    _connectionRetriesSoFar++;
+                    if (_maxConnectionRetries > 0 && _connectionRetriesSoFar > _maxConnectionRetries)
+                    {
+                        Close();
+                        OnConnectionRetriesExceeded?.Invoke(this, EventArgs.Empty);
+                    }
+                    else
+                    {
+                        OnConnectionRetry?.Invoke(this, RemoteHostName);
+                        Thread.Sleep(1000);
+                    }
                 }
             }
         }
@@ -350,7 +377,7 @@ namespace NanoMessenger
                 int i;
                 while ((i = _stream.Read(_buffer, 0, _buffer.Length)) != 0)
                 {
-                    string data = $"{ _data }{ System.Text.Encoding.ASCII.GetString(_buffer, 0, i) }";
+                    string data = $"{ _data }{ Encoding.ASCII.GetString(_buffer, 0, i) }";
                     Array.Clear(_buffer, 0, _buffer.Length);
 
                     // max data in the read buffer is BUFFER_SIZE bytes which should be enough for most messages
@@ -424,10 +451,6 @@ namespace NanoMessenger
                 }
                 catch
                 {
-                    // connection was forcibly closed - shut it down and wait for re-connection
-                    OnDisconnected?.Invoke(this, EventArgs.Empty);
-                    Close();
-                    Open();
                     return false;
                 }
             }
@@ -443,12 +466,13 @@ namespace NanoMessenger
 
         }
 
-        private Messenger(string name, ushort port, int pingTimeOutInSeconds = 5) : this(name, null, port, pingTimeOutInSeconds)
+        private Messenger(string name, ushort port, int pingIntervalInSeconds, int pingTimeOutInSeconds, int listenTimeoutInSeconds) : this(name, null, port, pingIntervalInSeconds, pingTimeOutInSeconds, -1)
         {
             Type = MessengerType.Receive;
+            _listenTimeoutInSeconds = listenTimeoutInSeconds;
         }
 
-        private Messenger(string name, string remoteHost, ushort port, int pingTimeOutInSeconds = 5)
+        private Messenger(string name, string remoteHost, ushort port, int pingIntervalInSeconds, int pingTimeOutInSeconds, int maxConnectionRetries)
         {
             Name = name;
 
@@ -459,6 +483,8 @@ namespace NanoMessenger
             Port = port;
             Type = MessengerType.Transmit;
             _pingTimeoutInSeconds = pingTimeOutInSeconds;
+            _pingIntervalInSeconds = pingIntervalInSeconds;
+            _maxConnectionRetries = maxConnectionRetries;
             PingEnabled = true;
         }
     }
