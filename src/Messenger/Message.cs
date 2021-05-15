@@ -4,9 +4,9 @@ namespace NanoMessenger
 {
     public class Message
     {
-        public static Message Parse(string messageString)
+        public static Message FromWireFormat(string wireFormattedMessageString)
         {
-            string[] messageParts = messageString.Split('|');
+            string[] messageParts = wireFormattedMessageString.Split('|');
             
             if (messageParts.Length < 3) ThrowInvalid();
             if (!Guid.TryParse(messageParts[0], out Guid id)) ThrowInvalid();
@@ -32,7 +32,7 @@ namespace NanoMessenger
         public Guid ID { get; private set; } = Guid.NewGuid();
         public string Text { get; private set; }
 
-        public override string ToString()
+        public string ToWireFormat()
         {
             string messageText = Text;
             messageText = messageText.Replace(Messenger.INTERNAL_MESSAGE_TOKEN, $"\\{ Messenger.INTERNAL_MESSAGE_TOKEN }");

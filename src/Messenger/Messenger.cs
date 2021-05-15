@@ -85,7 +85,7 @@ namespace NanoMessenger
         public event EventHandler OnListenerTimedOut;
         public event EventHandler OnConnectionRetriesExceeded;
 
-        public void Open()
+        public void BeginConnect()
         {
             if (!_connected)
             {
@@ -221,7 +221,7 @@ namespace NanoMessenger
             {
                 OnDisconnected?.Invoke(this, EventArgs.Empty);
                 Close();
-                Open();
+                BeginConnect();
             }
 
             _pingBackPending = false;
@@ -251,7 +251,7 @@ namespace NanoMessenger
                         {
                             // probably the client closed down... let's start trying to reconnect
                             Close();
-                            Open();
+                            BeginConnect();
                         }
                         catch
                         {
@@ -297,7 +297,6 @@ namespace NanoMessenger
                 _canPing = true;
             }
 
-            // can specify a max time to wait for connections... if exceeded, close down and notify clients subscribed
             if (_listenTimeoutInSeconds > 0 && DateTime.Now.Subtract(_startedListening).TotalSeconds > _listenTimeoutInSeconds)
             {
                 Close();
@@ -315,7 +314,7 @@ namespace NanoMessenger
                 {
                     client.Connect(RemoteAddress, Port);
                 }
-                catch (Exception ex)
+                catch
                 {
                     // couldn't connect yet... no problem, next time round we'll try again
                 }
@@ -363,7 +362,7 @@ namespace NanoMessenger
                     if (!_disconnecting && _messageQueue.Count > 0)
                     {
                         QueueEntry topOfQueue = _messageQueue.First();
-                        bool sent = Send($"{ topOfQueue.Message.ToString() }");
+                        bool sent = Send($"{ topOfQueue.Message.ToWireFormat() }");
                         if (sent) _messageQueue.RemoveAt(0);
                     }
                 }
@@ -416,7 +415,7 @@ namespace NanoMessenger
                                 }
                                 else
                                 {
-                                    Message incomingMessage = Message.Parse(message);
+                                    Message incomingMessage = Message.FromWireFormat(message);
 
                                     // all messages received are acknowledged back to the client
                                     // in case the client needs to know when it's been delivered
