@@ -24,12 +24,9 @@ namespace NanoMessenger.Tests
         {
             Message message = new Message("This test message contains the reserved sequences $$ and |.");
             string wireFormat = message.ToWireFormat();
-
             Message message2 = Message.FromWireFormat(wireFormat);
 
             Assert.That(message2.Text == message.Text);
         }
-
-
     }
 }
