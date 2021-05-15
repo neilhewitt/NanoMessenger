@@ -30,11 +30,11 @@ namespace NanoMessenger
         public const string PIPE_ESCAPE = INTERNAL_MESSAGE_TOKEN + "PIPE";
 
         public const int BUFFER_SIZE = 65536;
-        public const int DEFAULT_CONNECTION_TIMEOUT = 3000;
-        public const int DEFAULT_PING_INTERVAL = 3;
-        public const int DEFAULT_PING_TIMEOUT = 5;
-        public const int DEFAULT_MAX_RETRIES = -1;
-        public const int DEFAULT_LISTEN_TIMEOUT = -1;
+        public const int DEFAULT_CONNECTION_TIMEOUT = 3000; // in ms
+        public const int DEFAULT_PING_INTERVAL = 3; // in s
+        public const int DEFAULT_PING_TIMEOUT = 5; // in s
+        public const int DEFAULT_MAX_RETRIES = -1; // # of retries, -1 == infinite retries
+        public const int DEFAULT_LISTEN_TIMEOUT = -1; // in ms, -1 == no timeout
 
         private Thread _processMessagesTask;
         private Thread _pingTask;
@@ -76,8 +76,6 @@ namespace NanoMessenger
         public int ConnectTimeoutInMilliseconds { get; set; }
         public int ListenTimeoutInMilliseconds { get; set; }
         public int MaxConnectionRetries { get; set; }
-
-
         public int QueueLength => _messageQueue?.Count ?? -1;
 
         public event EventHandler<Message> OnReceiveMessage;
@@ -265,8 +263,7 @@ namespace NanoMessenger
                         }
 
                         // messages are pulled from a queue, but the queue is really only there to provide resilience from disconnection;
-                        // only the top-most message is sent now, so the queue is now effectively a buffer; sending all messages at once
-                        // is faster but you risk overloading the receive buffer on the other end
+                        // only the top-most message is sent now
                         SendOutgoingMessage();
                     }
 
@@ -318,6 +315,7 @@ namespace NanoMessenger
                 TcpClient client = new TcpClient();
                 try
                 {
+                    // this is a simple way of enforcing a shorter connect timeout if required
                     client.ConnectAsync(RemoteAddress, Port).Wait(ConnectTimeoutInMilliseconds);
                 }
                 catch
@@ -450,7 +448,7 @@ namespace NanoMessenger
             {
                 try
                 {
-                    byte[] textBytes = Encoding.ASCII.GetBytes($"{text}{ END_OF_MESSAGE }");
+                    byte[] textBytes = Encoding.ASCII.GetBytes($"{ text }{ END_OF_MESSAGE }");
                     _stream.Write(textBytes, 0, textBytes.Length);
                     return true;
                 }
