@@ -367,7 +367,11 @@ namespace NanoMessenger
                     {
                         QueueEntry topOfQueue = _messageQueue.First();
                         bool sent = Send($"{ topOfQueue.Message.ToWireFormat() }");
-                        if (sent) _messageQueue.RemoveAt(0);
+                        if (sent)
+                        {
+                            _messageQueue.RemoveAt(0);
+                            topOfQueue.Callback?.Invoke(topOfQueue.Message.Text);
+                        }
                     }
                 }
             }

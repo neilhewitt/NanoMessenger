@@ -12,6 +12,7 @@ namespace NanoMessenger.Tests
             Messenger transmitter = Messenger.Transmitter("Server", "127.0.0.1", 16384);
             transmitter.MaxConnectionRetries = retries;
             transmitter.ConnectTimeoutInMilliseconds = connectTimeout;
+            transmitter.PingEnabled = false;
             return transmitter;
         }
 
@@ -19,6 +20,7 @@ namespace NanoMessenger.Tests
         {
             Messenger receiver = Messenger.Receiver("Server", 16384);
             receiver.ListenTimeoutInMilliseconds = timeout;
+            receiver.PingEnabled = false;
             return receiver;
         }
 
