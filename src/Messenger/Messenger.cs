@@ -276,7 +276,12 @@ namespace NanoMessenger
 
         private void ConnectIfReceiver()
         {
-            if (!_disconnecting && Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
+            if (ListenTimeoutInMilliseconds > 0 && DateTime.Now.Subtract(_startedListening).TotalMilliseconds > ListenTimeoutInMilliseconds)
+            {
+                Close();
+                OnListenerTimedOut?.Invoke(this, EventArgs.Empty);
+            }
+            else if (!_disconnecting && Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
             {
                 OnConnecting?.Invoke(this, EventArgs.Empty);
                 _client = _listener.AcceptTcpClient();
@@ -300,12 +305,6 @@ namespace NanoMessenger
 
                 GetStream();
                 _canPing = true;
-            }
-
-            if (ListenTimeoutInMilliseconds > 0 && DateTime.Now.Subtract(_startedListening).TotalSeconds > ListenTimeoutInMilliseconds)
-            {
-                Close();
-                OnListenerTimedOut?.Invoke(this, EventArgs.Empty);
             }
         }
 
