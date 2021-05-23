@@ -35,6 +35,7 @@ namespace NanoMessenger
         public const int DEFAULT_PING_TIMEOUT = 5; // in s
         public const int DEFAULT_MAX_RETRIES = -1; // # of retries, -1 == infinite retries
         public const int DEFAULT_LISTEN_TIMEOUT = -1; // in ms, -1 == no timeout
+        public const int DEFAULT_WAIT_AFTER_DISCONNECT = 3; // in s
 
         private Thread _processMessagesTask;
         private Thread _pingTask;
@@ -76,6 +77,7 @@ namespace NanoMessenger
         public int ConnectTimeoutInMilliseconds { get; set; }
         public int ListenTimeoutInMilliseconds { get; set; }
         public int MaxConnectionRetries { get; set; }
+        public int WaitAfterDisconnectInSeconds { get; set; }
         public int QueueLength => _messageQueue?.Count ?? -1;
 
         public event EventHandler<Message> OnReceiveMessage;
@@ -84,6 +86,7 @@ namespace NanoMessenger
         public event EventHandler<string> OnConnectionRetry;
         public event EventHandler OnConnected;
         public event EventHandler OnDisconnected;
+        public event EventHandler OnMessageLoopIOException;
         public event EventHandler<string> OnPing;
         public event EventHandler<string> OnPingBack;
         public event EventHandler OnListenerTimedOut;
@@ -205,30 +208,27 @@ namespace NanoMessenger
                         _pingBackPending = true;
                         _pingBackReceived = false;
                         Send(PING_MESSAGE); // PING should be responded to with PINGBACK or else the connection is down
-                        AwaitPingBack();
-                        Thread.Sleep(3000);
+
+                        DateTime start = DateTime.Now;
+
+                        // wait for the ping back or timeout, whichever comes first
+                        while (!_pingBackReceived && DateTime.Now.Subtract(start).Seconds < PingTimeoutInSeconds) Thread.Sleep(1);
+
+                        if (!_pingBackReceived)
+                        {
+                            Close();
+                            OnDisconnected?.Invoke(this, EventArgs.Empty);
+                            Thread.Sleep(WaitAfterDisconnectInSeconds * 1000);
+                            BeginConnect();
+                        }
+
+                        // wait out the interval between pings (while yielding the CPU) 
+                        while (DateTime.Now.Subtract(start).Seconds < PingIntervalInSeconds) Thread.Sleep(1);
+
+                        _pingBackPending = false;
                     }
                 }
-
-                Thread.Sleep(1);
             }
-        }
-
-        private void AwaitPingBack()
-        {
-            DateTime start = DateTime.Now;
-            
-            // there must be a more attractive way of doing this... wait until the pingback happens or timeout occurs
-            while (!_pingBackReceived && DateTime.Now.Subtract(start).Seconds < PingTimeoutInSeconds) ;
-            
-            if (!_pingBackReceived)
-            {
-                OnDisconnected?.Invoke(this, EventArgs.Empty);
-                Close();
-                BeginConnect();
-            }
-
-            _pingBackPending = false;
         }
 
         private void MessageLoop()
@@ -255,6 +255,8 @@ namespace NanoMessenger
                         {
                             // probably the client closed down... let's start trying to reconnect
                             Close();
+                            OnMessageLoopIOException?.Invoke(this, EventArgs.Empty);
+                            Thread.Sleep(WaitAfterDisconnectInSeconds * 1000);
                             BeginConnect();
                         }
                         catch
@@ -410,7 +412,7 @@ namespace NanoMessenger
                             }
                             else if (message == PING_BACK_MESSAGE)
                             {
-                                _pingBackReceived = true; // this is a semaphore for the EnsurePingBack method above
+                                _pingBackReceived = true; // this is a semaphore for the PingLoop thread
                                 OnPingBack?.Invoke(this, RemoteHostName);
                             }
                             else
@@ -493,6 +495,7 @@ namespace NanoMessenger
             ConnectTimeoutInMilliseconds = DEFAULT_CONNECTION_TIMEOUT;
             ListenTimeoutInMilliseconds = DEFAULT_LISTEN_TIMEOUT;
             MaxConnectionRetries = DEFAULT_MAX_RETRIES;
+            WaitAfterDisconnectInSeconds = DEFAULT_WAIT_AFTER_DISCONNECT;
             PingEnabled = true;
         }
     }
