@@ -7,19 +7,19 @@ namespace NanoMessenger.Tests
     [TestFixture, Explicit, Timeout(30000)]
     public class ConnectionTests
     {
-        public Messenger MakeTransmitter(int retries = Messenger.DEFAULT_MAX_RETRIES, int connectTimeoutInMilliseconds = Messenger.DEFAULT_CONNECTION_TIMEOUT)
+        public Messenger MakeTransmitter(int retries = Messenger.DEFAULT_MAX_RETRIES, int connectTimeoutInSeconds = Messenger.DEFAULT_CONNECTION_TIMEOUT)
         {
             Messenger transmitter = Messenger.Transmitter("Server", "127.0.0.1", 16384);
             transmitter.MaxConnectionRetries = retries;
-            transmitter.ConnectTimeoutInMilliseconds = connectTimeoutInMilliseconds;
+            transmitter.ConnectTimeoutInSeconds = connectTimeoutInSeconds;
             transmitter.PingEnabled = false;
             return transmitter;
         }
 
-        public Messenger MakeReceiver(int timeoutInMilliseconds = Messenger.DEFAULT_CONNECTION_TIMEOUT)
+        public Messenger MakeReceiver(int timeoutInSeconds = Messenger.DEFAULT_CONNECTION_TIMEOUT)
         {
             Messenger receiver = Messenger.Receiver("Server", 16384);
-            receiver.ListenTimeoutInMilliseconds = timeoutInMilliseconds;
+            receiver.ListenTimeoutInSeconds = timeoutInSeconds;
             receiver.PingEnabled = false;
             return receiver;
         }
@@ -27,7 +27,7 @@ namespace NanoMessenger.Tests
         [Test]
         public void GivenNoResponseFromReceiver_WhenMaxRetriesSet_TransmitterConnectionFailsAndIsClosed()
         {
-            using (Messenger server = MakeTransmitter(retries: 3, connectTimeoutInMilliseconds: 1000))
+            using (Messenger server = MakeTransmitter(retries: 3, connectTimeoutInSeconds: 1))
             {
                 bool waiting = true;
                 server.OnConnectionRetriesExceeded += (sender, e) => { 
@@ -44,7 +44,7 @@ namespace NanoMessenger.Tests
         [Test]
         public void GivenNoConnectionFromTransmitter_WhenTimeoutIsSetAndExceeded_ReceiverConnectionFailsAndIsClosed()
         {
-            using (Messenger client = MakeReceiver(timeoutInMilliseconds: 5000))
+            using (Messenger client = MakeReceiver(timeoutInSeconds: 5))
             {
                 bool waiting = true;
                 client.OnListenerTimedOut += (sender, e) => {

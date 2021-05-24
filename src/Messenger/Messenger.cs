@@ -30,11 +30,11 @@ namespace NanoMessenger
         public const string PIPE_ESCAPE = INTERNAL_MESSAGE_TOKEN + "PIPE";
 
         public const int BUFFER_SIZE = 65536;
-        public const int DEFAULT_CONNECTION_TIMEOUT = 3000; // in ms
+        public const int DEFAULT_CONNECTION_TIMEOUT = 3; // in s
         public const int DEFAULT_PING_INTERVAL = 3; // in s
         public const int DEFAULT_PING_TIMEOUT = 5; // in s
-        public const int DEFAULT_MAX_RETRIES = -1; // # of retries, -1 == infinite retries
-        public const int DEFAULT_LISTEN_TIMEOUT = -1; // in ms, -1 == no timeout
+        public const int DEFAULT_MAX_RETRIES = -1; // # of retries, <0 == infinite retries
+        public const int DEFAULT_LISTEN_TIMEOUT = -1; // in s, <0 == no timeout
         public const int DEFAULT_WAIT_AFTER_DISCONNECT = 3; // in s
 
         private Thread _processMessagesTask;
@@ -74,8 +74,8 @@ namespace NanoMessenger
         public bool PingEnabled { get; set; } = false;
         public int PingTimeoutInSeconds { get; set; }
         public int PingIntervalInSeconds { get; set; }
-        public int ConnectTimeoutInMilliseconds { get; set; }
-        public int ListenTimeoutInMilliseconds { get; set; }
+        public int ConnectTimeoutInSeconds { get; set; }
+        public int ListenTimeoutInSeconds { get; set; }
         public int MaxConnectionRetries { get; set; }
         public int WaitAfterDisconnectInSeconds { get; set; }
         public int QueueLength => _messageQueue?.Count ?? -1;
@@ -276,7 +276,7 @@ namespace NanoMessenger
 
         private void ConnectIfReceiver()
         {
-            if (ListenTimeoutInMilliseconds > 0 && DateTime.Now.Subtract(_startedListening).TotalMilliseconds > ListenTimeoutInMilliseconds)
+            if (ListenTimeoutInSeconds > 0 && DateTime.Now.Subtract(_startedListening).TotalSeconds > ListenTimeoutInSeconds)
             {
                 Close();
                 OnListenerTimedOut?.Invoke(this, EventArgs.Empty);
@@ -317,7 +317,7 @@ namespace NanoMessenger
                 try
                 {
                     // this is a simple way of enforcing a shorter connect timeout if required
-                    client.ConnectAsync(RemoteAddress, Port).Wait(ConnectTimeoutInMilliseconds);
+                    client.ConnectAsync(RemoteAddress, Port).Wait(ConnectTimeoutInSeconds * 1000);
                 }
                 catch
                 {
@@ -491,8 +491,8 @@ namespace NanoMessenger
             Type = MessengerType.Transmit;
             PingTimeoutInSeconds = DEFAULT_PING_TIMEOUT;
             PingIntervalInSeconds = DEFAULT_PING_INTERVAL;
-            ConnectTimeoutInMilliseconds = DEFAULT_CONNECTION_TIMEOUT;
-            ListenTimeoutInMilliseconds = DEFAULT_LISTEN_TIMEOUT;
+            ConnectTimeoutInSeconds = DEFAULT_CONNECTION_TIMEOUT;
+            ListenTimeoutInSeconds = DEFAULT_LISTEN_TIMEOUT;
             MaxConnectionRetries = DEFAULT_MAX_RETRIES;
             WaitAfterDisconnectInSeconds = DEFAULT_WAIT_AFTER_DISCONNECT;
             PingEnabled = true;
