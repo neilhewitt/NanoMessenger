@@ -39,11 +39,11 @@ The receiver factory method needs no IP address because a receiver will accept a
 
 #### Pings
 
-By default the ping function is always enabled, and pings are sent by each end of the connection every 3 seconds (this value is not currently configurable, although the timeout for the ping response, after which the connection will be deemed to have dropped, needs to be specified). When a connection drop happens the Messenger on each end will tidy up and close down the connection and then begin trying to re-connect. 
+By default the ping function is always enabled, and pings are sent by each end of the connection every 3 seconds. If the ping is not responded to within 5 seconds with a ping back, then the connection is deemed to have dropped. When a connection drop happens, the Messenger on each end will tidy up and close down the connection and then begin trying to re-connect. 
 
 However, there are circumstances where you might not want to have the pings enabled (for example if debugging) as they run on a separate thread and will not stop at the breakpoint. So you can set the PingEnabled property to false. You should not do this in a deployed context as otherwise the Messenger will go on attempting to send and receive messages until the underlying TcpClient becomes aware that it is disconnected (which may never happen).
 
-You can set the ping timeout and interval between pings as properties on the Messenger class. 
+You can set the ping timeout and interval between pings as properties on the Messenger class. You can also specify that more than one ping can fail before the connection is deemed to have dropped.
 
 #### Opening and Closing the Messenger
 
