@@ -29,13 +29,13 @@ The only difference between a Receiver and a Transmitter is that a Transmitter a
 
 #### Examples:
 
-    Messenger server = Messenger.Transmitter("Nickname for connection", "CLIENT_PC_NAME", 16384, 10);
+    Messenger server = Messenger.Transmitter("Nickname for connection", "CLIENT_PC_NAME", 16384);
   
-You specify a nickname for the connection (this can be handy if you're running multiple connections) which can be any string. The transmitter needs the DNS name (or IP address as string) of the client PC to connect to. The third parameter is the port number to use (this must not be blocked by the Windows Firewall and unblocking it is your responsibility), and the fourth is the timeout (in seconds) for the ping operation that checks whether the connection is still live.
+You specify a nickname for the connection (this can be handy if you're running multiple connections) which can be any string. The transmitter needs the DNS name (or IP address as string) of the client PC to connect to. The third parameter is the port number to use (this must not be blocked by the Windows Firewall and unblocking it is your responsibility).
 
-    Messenger client = Messenger.Receiver("Nickname for connection", 16384, 10);
+    Messenger client = Messenger.Receiver("Nickname for connection", 16384);
   
-The receiver factory method needs no IP address but otherwise the parameters are identical.
+The receiver factory method needs no IP address because a receiver will accept a connection from any address on any interface, but otherwise the parameters are identical.
 
 #### Pings
 
@@ -43,17 +43,19 @@ By default the ping function is always enabled, and pings are sent by each end o
 
 However, there are circumstances where you might not want to have the pings enabled (for example if debugging) as they run on a separate thread and will not stop at the breakpoint. So you can set the PingEnabled property to false. You should not do this in a deployed context as otherwise the Messenger will go on attempting to send and receive messages until the underlying TcpClient becomes aware that it is disconnected (which may never happen).
 
+You can set the ping timeout and interval between pings as properties on the Messenger class. 
+
 #### Opening and Closing the Messenger
 
-Two methods, Open() and Close(), are supplied. Open() begins the process of attempting to connect. Close() closes down the connection but does not dispose any threads or resources, and the connection can be re-opened by calling Open() again. 
+Two methods, BeginConnect() and Close(), are supplied. BeginConnect() begins the process of attempting to connect. Close() closes down the connection but does not dispose any threads or resources, and the connection can be re-opened by calling BeginConnect() again. 
 
-The Connected property indicates if the Messenger is currently connected. This status is controlled by the ping mechanism, so it's possible for a connection to have disconnected during the timeout period for the ping (or if pinging is disabled) while Connected remains true. You should account for this latency in your application. 
+The Connected property indicates if the Messenger is currently connected. This status is controlled by the ping mechanism, so it's possible for a connection to have disconnected during the timeout period for the ping (or if pinging is disabled) while Connected remains true. You should account for this in your application. 
 
 #### Sending messages
 
-The core of the Messenger is the queue to which messages can be added for transmission to the other end of the connection.
+The core of the Messenger is a queue to which messages can be added for transmission to the other end of the connection.
 
-To add a message to the queue, call QueueMessage(). It takes a single string parameter containing the message to send. Messages may only be strings and are unstructured, though you can of course use your own format within the string to structure the data if you wish.
+To add a message to the queue, call QueueMessage(). It takes a single string parameter containing the message to send. Messages may only be strings and are unstructured, though you can of course use your own format within the string to structure the data as you wish.
 
     Message message = messenger.QueueMessage("Hello, world!");
     
@@ -65,7 +67,7 @@ The QueueMessage() method returns a Message object which is a reference to the o
 
 To receive incoming messages, you should bind to the OnReceiveMessage event. The event handler will supply the Message object for the message which includes its ID and timestamp (so you could measure delivery latency if you needed to).
 
-Remember that messages can be sent in both directions (receiver to transmitter and transmitter to receiver), and so both ends can receive messages. Generally, message transmission for your application will be transmitter -> receiver (hence the names) but for your application it may well be necessary to send messages back to the transmitter and there is no difference in how this is done. 
+Remember that messages can be sent in both directions (receiver to transmitter and transmitter to receiver), and so both ends can receive messages. The only difference between the two is that transmitters actively try to connect to an endpoint, whereas receivers wait to be connected **to**. Generally, message transmission for your application will be transmitter -> receiver (hence the names) but for your application it may well be necessary to send messages back to the transmitter and there is no difference in how this is done. 
 
 When a message is received by either end, that end of the connection will send back an acknowledgement message. This is an *internal* message and you will **not** receive the OnReceiveMessage event when it arrives. If you need to verify that messages have been received you can subscribe to the OnReceiveAcknowledge event which will supply the message ID of the received message. 
 
@@ -82,9 +84,9 @@ The Messenger class has several other events you can subscribe to:
 
 #### Disposing the Messenger
 
-The Messenger uses several threads to ping and send / receive messages. When you call Close(), these threads are **not** terminated. Messenger implements IDisposable and you should either use the using() pattern or call Dispose() manually when you are done with a Messenger object.
+The Messenger uses several threads to ping and send / receive messages. When you call Close(), these threads are **not** terminated. Messenger implements IDisposable and you should either use the using() pattern or call Dispose() when you are done with a Messenger object.
 
-There is a finalizer which will call Dispose() if you forget to, but this only runs when the object is GCd and depending on your application this might not happen for a while, it might keep your application open in the background. So DON'T FORGET TO DISPOSE!
+There is a finalizer which will call Dispose() if you forget to, but this only runs when the object is GCd and depending on your application this might not happen for a while, and this might keep your application open in the background. So DON'T FORGET TO DISPOSE!
 
 ## Sample code
 
