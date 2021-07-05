@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -63,7 +64,8 @@ namespace NanoMessenger
         private byte[] _buffer = new byte[BUFFER_SIZE];
         private string _data = "";
 
-        private List<QueueEntry> _messageQueue = new List<QueueEntry>();
+        private ConcurrentQueue<QueueEntry> _messageQueue = new ConcurrentQueue<QueueEntry>();
+        private object _queueLock = new object();
 
         public string Name { get; private set; }
         public IPAddress RemoteAddress { get; private set; }
@@ -147,18 +149,18 @@ namespace NanoMessenger
 
         public Message QueueMessage(string text, Action<string> callbackAfterSent = null)
         {
-            lock (_messageQueue)
+            lock (_queueLock)
             {
                 Message message = new Message(text);
                 QueueEntry item = new QueueEntry(message, callbackAfterSent);
-                _messageQueue.Add(item);
+                _messageQueue.Enqueue(item);
                 return message;
             }
         }
 
         public IEnumerable<Message> GetQueuedMessages()
         {
-            lock (_messageQueue)
+            lock (_queueLock)
             {
                 return new List<Message>(_messageQueue.Select(x => x.Message));
             }
@@ -166,17 +168,17 @@ namespace NanoMessenger
 
         public Message PeekQueue()
         {
-            lock (_messageQueue)
+            lock (_queueLock)
             {
-                return _messageQueue[0].Message;
+                return _messageQueue.TryPeek(out QueueEntry entry) ? entry.Message : null;
             }
         }
 
         public void ClearQueue()
         {
-            lock(_messageQueue)
+            lock(_queueLock)
             {
-                _messageQueue.Clear();
+                _messageQueue = new ConcurrentQueue<QueueEntry>();
             }
         }
 
@@ -354,6 +356,7 @@ namespace NanoMessenger
                     {
                         Close(); // this is the final insult! Time to give up and signal the consumer
                         OnConnectionRetriesExceeded?.Invoke(this, EventArgs.Empty);
+                        _connectionRetriesSoFar = 0;
                     }
                     else
                     {
@@ -375,16 +378,17 @@ namespace NanoMessenger
         {
             if (_stream != null && _client.Connected)
             {
-                lock (_messageQueue)
+                lock (_queueLock)
                 {
                     if (!_disconnecting && _messageQueue.Count > 0)
                     {
-                        QueueEntry topOfQueue = _messageQueue.First();
-                        bool sent = Send($"{ topOfQueue.Message.ToWireFormat() }");
-                        if (sent)
+                        if (_messageQueue.TryDequeue(out QueueEntry topOfQueue))
                         {
-                            _messageQueue.RemoveAt(0);
-                            topOfQueue.Callback?.Invoke(topOfQueue.Message.Text);
+                            bool sent = Send($"{ topOfQueue.Message.ToWireFormat() }");
+                            if (sent)
+                            {
+                                topOfQueue.Callback?.Invoke(topOfQueue.Message.Text);
+                            }
                         }
                     }
                 }
