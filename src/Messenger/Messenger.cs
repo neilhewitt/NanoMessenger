@@ -8,7 +8,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace NanoMessenger
 {
@@ -29,16 +28,17 @@ namespace NanoMessenger
         public const string PING_BACK_MESSAGE = INTERNAL_MESSAGE_TOKEN + "PINGBACK";
         public const string ACK_MESSAGE = INTERNAL_MESSAGE_TOKEN + "ACK ";
         public const string END_OF_MESSAGE = INTERNAL_MESSAGE_TOKEN + "ENDS";
+        public const string CLOSE_MESSAGE = INTERNAL_MESSAGE_TOKEN + "CLOSE";
         public const string PIPE_ESCAPE = INTERNAL_MESSAGE_TOKEN + "PIPE";
 
         public const int BUFFER_SIZE = 65536;
-        public const int DEFAULT_CONNECTION_TIMEOUT = 3000; // in ms
-        public const int DEFAULT_PING_INTERVAL = 3; // in s
-        public const int DEFAULT_PING_TIMEOUT = 5; // in s
-        public const int DEFAULT_PING_FAILS_ALLOWED = 1; // # of failed pings to allow before disconnecting
-        public const int DEFAULT_MAX_RETRIES = -1; // # of retries, <=0 == infinite retries
-        public const int DEFAULT_LISTEN_TIMEOUT = -1; // in s, <=0 == no timeout
-        public const int DEFAULT_WAIT_AFTER_DISCONNECT = 3; // in s
+        public const int DEFAULT_CONNECTION_TIMEOUT_IN_MILLISECONDS = 3000;
+        public const int DEFAULT_PING_INTERVAL_IN_SECONDS = 3; 
+        public const int DEFAULT_PING_TIMEOUT_IN_SECONDS = 5; 
+        public const int DEFAULT_MAX_PING_FAILS_ALLOWED = 1; 
+        public const int DEFAULT_MAX_RETRIES = -1; // <=0 == infinite retries
+        public const int DEFAULT_LISTEN_TIMEOUT_IN_SECONDS = -1; // <=0 == no timeout
+        public const int DEFAULT_WAIT_AFTER_DISCONNECT_IN_SECONDS = 3;
 
         private Thread _processMessagesTask;
         private Thread _pingTask;
@@ -62,10 +62,18 @@ namespace NanoMessenger
         private DateTime _startedListening;
 
         private byte[] _buffer = new byte[BUFFER_SIZE];
-        private string _data = "";
+        private string _partialMessageData = "";
 
         private ConcurrentQueue<QueueEntry> _messageQueue = new ConcurrentQueue<QueueEntry>();
         private object _queueLock = new object();
+
+        public int ConnectionTimeoutInMilliseconds { get; set; } = DEFAULT_CONNECTION_TIMEOUT_IN_MILLISECONDS;
+        public int PingTimeoutInSeconds { get; set; } = DEFAULT_PING_INTERVAL_IN_SECONDS;
+        public int PingIntervalInSeconds { get; set; } = DEFAULT_PING_INTERVAL_IN_SECONDS;
+        public int MaxAllowedFailedPings { get; set; } = DEFAULT_MAX_PING_FAILS_ALLOWED;
+        public int ListenTimeoutInSeconds { get; set; } = DEFAULT_LISTEN_TIMEOUT_IN_SECONDS;
+        public int MaxConnectionRetries { get; set; } = DEFAULT_MAX_RETRIES;
+        public int WaitAfterDisconnectInSeconds { get; set; } = DEFAULT_WAIT_AFTER_DISCONNECT_IN_SECONDS;
 
         public string Name { get; private set; }
         public IPAddress RemoteAddress { get; private set; }
@@ -77,13 +85,6 @@ namespace NanoMessenger
         public bool Connected => _connected;
         public bool Closed => !_connected && _paused && _listener == null && _client == null && _stream == null;
         public bool PingEnabled { get; set; } = false;
-        public int ConnectionTimeoutInMilliseconds { get; set; }
-        public int PingTimeoutInSeconds { get; set; }
-        public int PingIntervalInSeconds { get; set; }
-        public int MaxAllowedFailedPings { get; set; }
-        public int ListenTimeoutInSeconds { get; set; }
-        public int MaxConnectionRetries { get; set; }
-        public int WaitAfterDisconnectInSeconds { get; set; }
         public int QueueLength => _messageQueue?.Count ?? -1;
 
         public event EventHandler<Message> OnReceiveMessage;
@@ -92,6 +93,8 @@ namespace NanoMessenger
         public event EventHandler OnConnectionRetry;
         public event EventHandler OnConnected;
         public event EventHandler OnDisconnected;
+        public event EventHandler OnClosing;
+        public event EventHandler OnClosed;
         public event EventHandler OnMessageLoopIOException;
         public event EventHandler OnPing;
         public event EventHandler OnPingBack;
@@ -129,22 +132,7 @@ namespace NanoMessenger
         // the Messenger instance you must call Dispose() (or use the using() pattern)
         public void Close()
         {
-            _disconnecting = true;
-
-            _paused = true;
-            _canPing = false;
-            _connected = false;
-
-            _listener?.Stop();
-            _listening = false;
-            _listener = null;
-
-            _stream?.Close();
-            _client?.Close();
-            _client = null;
-            _stream = null;
-
-            _disconnecting = false;
+            Close(true);
         }
 
         public Message QueueMessage(string text, Action<string> callbackAfterSent = null)
@@ -202,6 +190,38 @@ namespace NanoMessenger
             }
         }
 
+        private void Close(bool closedFromThisSide)
+        {
+            if (_connected)
+            {
+                if (closedFromThisSide)
+                {
+                    Send(CLOSE_MESSAGE);
+                    Thread.Sleep(500);
+                }
+
+                _disconnecting = true;
+                _paused = true;
+                _canPing = false;
+                _connected = false;
+
+                OnClosing?.Invoke(this, EventArgs.Empty);
+
+                _listener?.Stop();
+                _listening = false;
+                _listener = null;
+
+                _stream?.Close();
+                _client?.Close();
+                _client = null;
+                _stream = null;
+
+                OnClosed?.Invoke(this, EventArgs.Empty);
+
+                _disconnecting = false;
+            }
+        }
+
         private void PingLoop()
         {
             while (!_terminateThreads)
@@ -213,33 +233,34 @@ namespace NanoMessenger
                         OnPing?.Invoke(this, EventArgs.Empty);
                         _pingBackPending = true;
                         _pingBackReceived = false;
-                        Send(PING_MESSAGE); // PING should be responded to with PINGBACK or else the connection is down
+                        Send(PING_MESSAGE);
 
                         DateTime start = DateTime.Now;
-
-                        // wait for the ping back or timeout, whichever comes first
-                        while (!_pingBackReceived && DateTime.Now.Subtract(start).Seconds < PingTimeoutInSeconds) Thread.Sleep(1);
+                        Wait(start, PingTimeoutInSeconds, _pingBackReceived);
 
                         if (!_pingBackReceived)
                         {
                             _pingFails++;
-                            if (_pingFails > MaxAllowedFailedPings) // default is 3 failed pings before disconnected
+                            if (_pingFails > MaxAllowedFailedPings)
                             {
                                 Close();
                                 OnDisconnected?.Invoke(this, EventArgs.Empty);
                                 Thread.Sleep(WaitAfterDisconnectInSeconds * 1000);
-                                BeginConnect();
                                 _pingFails = 0;
+                                BeginConnect();
                             }
                         }
 
-                        // wait out the interval between pings (while yielding the CPU) 
-                        while (DateTime.Now.Subtract(start).Seconds < PingIntervalInSeconds) Thread.Sleep(1);
-
+                        Wait(start, PingIntervalInSeconds);
                         _pingBackPending = false;
                     }
                 }
             }
+        }
+
+        private void Wait(DateTime waitStarted, int timeoutInSeconds, bool semaphore = false)
+        {
+            while (!semaphore && DateTime.Now.Subtract(waitStarted).Seconds < timeoutInSeconds) Thread.Sleep(1);
         }
 
         private void MessageLoop()
@@ -257,9 +278,6 @@ namespace NanoMessenger
                     {
                         try
                         {
-                            // generally there will only be one incoming message per go around the loop, but if the thread
-                            // runs too slowly then multiple messages may be in the stream unread, so this method
-                            // will handle multiple messages if necessary
                             ReceiveIncomingMessages();
                         }
                         catch (IOException)
@@ -272,11 +290,9 @@ namespace NanoMessenger
                         }
                         catch
                         {
-                            throw; // anything else is fatal
+                            throw;
                         }
 
-                        // messages are pulled from a queue, but the queue is really only there to provide resilience from disconnection;
-                        // only the top-most message is sent now
                         SendOutgoingMessage();
                     }
 
@@ -327,7 +343,7 @@ namespace NanoMessenger
                 TcpClient client = new TcpClient();
                 try
                 {
-                    // this is a simple way of enforcing a shorter connect timeout if required
+                    // this is a simple way of enforcing a shorter connect timeout (if required)
                     client.ConnectAsync(RemoteAddress, Port, ConnectionTimeoutInMilliseconds).Wait();
                 }
                 catch
@@ -348,13 +364,13 @@ namespace NanoMessenger
                 {
                     // it's possible that the connection was timed out (the timeout is something I am forcing as TcpClient doesn't have
                     // a connection timeout capability) but still completed after the timeout, leaving the
-                    // client connected, so we close it here which will terminate any connection so we can retry properly
+                    // client connected, so we close it here which will terminate any connection so we can retry properly,
                     // otherwise things can get out of sync
                     client.Close();
                     _connectionRetriesSoFar++;
                     if (MaxConnectionRetries > 0 && _connectionRetriesSoFar > MaxConnectionRetries)
                     {
-                        Close(); // this is the final insult! Time to give up and signal the consumer
+                        Close();
                         OnConnectionRetriesExceeded?.Invoke(this, EventArgs.Empty);
                         _connectionRetriesSoFar = 0;
                     }
@@ -402,7 +418,7 @@ namespace NanoMessenger
                 int i;
                 while ((i = _stream.Read(_buffer, 0, _buffer.Length)) != 0)
                 {
-                    string data = $"{ _data }{ Encoding.ASCII.GetString(_buffer, 0, i) }";
+                    string data = $"{ _partialMessageData }{ Encoding.ASCII.GetString(_buffer, 0, i) }";
                     Array.Clear(_buffer, 0, _buffer.Length);
 
                     // max data in the read buffer is BUFFER_SIZE bytes which should be enough for most messages
@@ -411,54 +427,48 @@ namespace NanoMessenger
                     // we'll stuff the data into a string field and concatenate the next set of data from the stream until
                     // we have a complete set of messages available to process
 
-                    // this does mean that messages may be delayed processing while we wait, but they will all be handled 
-                    // eventually
-
                     if (data.EndsWith(END_OF_MESSAGE))
                     {
-                        // if the buffer is being filled quickly we may have more than one message pending, so we'll handle them all now
                         string[] messages = data.Split(new string[] { END_OF_MESSAGE }, StringSplitOptions.RemoveEmptyEntries);
 
                         foreach (string message in messages)
                         {
-                            if (message == PING_MESSAGE)
+                            if (message == CLOSE_MESSAGE)
                             {
-                                // respond to the incoming ping with a pingback
+                                OnDisconnected.Invoke(this, EventArgs.Empty);
+                                Close(false);
+                                BeginConnect();
+                            }
+                            else if (message == PING_MESSAGE)
+                            {
                                 Send($"{ PING_BACK_MESSAGE }");
                             }
                             else if (message == PING_BACK_MESSAGE)
                             {
-                                _pingBackReceived = true; // this is a semaphore for the PingLoop thread
+                                _pingBackReceived = true; // this is the semaphore for the PingLoop thread
                                 OnPingBack?.Invoke(this, EventArgs.Empty);
                             }
                             else
                             {
                                 if (message.StartsWith(ACK_MESSAGE))
                                 {
-                                    // clients can subscribe to OnReceiveAcknowledge to know when their messages
-                                    // got there - this is the limit of any auditing we do here
                                     OnReceiveAcknowledge?.Invoke(this, Guid.Parse(message.Substring(ACK_MESSAGE.Length)));
                                 }
                                 else
                                 {
                                     Message incomingMessage = Message.FromWireFormat(message);
-
-                                    // all messages received are acknowledged back to the client
-                                    // in case the client needs to know when it's been delivered
                                     Send($"{ ACK_MESSAGE }{ incomingMessage.ID }");
-
                                     OnReceiveMessage?.Invoke(this, incomingMessage);
                                 }
                             }
                         }
 
-                        _data = "";
+                        _partialMessageData = "";
                         break;
                     }
                     else
                     {
-                        // store the current partial message for next time around the loop
-                        _data = data;
+                        _partialMessageData = data;
                     }
                 }
             }
@@ -506,13 +516,6 @@ namespace NanoMessenger
             RemoteAddress = remoteHost == null ? null : Dns.GetHostAddresses(remoteHost)[0];
             Port = port;
             Type = MessengerType.Transmit;
-            ConnectionTimeoutInMilliseconds = DEFAULT_CONNECTION_TIMEOUT;
-            PingTimeoutInSeconds = DEFAULT_PING_TIMEOUT;
-            PingIntervalInSeconds = DEFAULT_PING_INTERVAL;
-            MaxAllowedFailedPings = DEFAULT_PING_FAILS_ALLOWED;
-            ListenTimeoutInSeconds = DEFAULT_LISTEN_TIMEOUT;
-            MaxConnectionRetries = DEFAULT_MAX_RETRIES;
-            WaitAfterDisconnectInSeconds = DEFAULT_WAIT_AFTER_DISCONNECT;
             PingEnabled = true;
         }
     }
