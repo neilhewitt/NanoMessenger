@@ -435,8 +435,10 @@ namespace NanoMessenger
                         {
                             if (message == CLOSE_MESSAGE)
                             {
-                                OnDisconnected.Invoke(this, EventArgs.Empty);
                                 Close(false);
+                                OnDisconnected.Invoke(this, EventArgs.Empty);
+                                Thread.Sleep(WaitAfterDisconnectInSeconds * 1000);
+                                _pingFails = 0;
                                 BeginConnect();
                             }
                             else if (message == PING_MESSAGE)
