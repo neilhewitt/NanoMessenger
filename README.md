@@ -51,6 +51,8 @@ Two methods, BeginConnect() and Close(), are supplied. BeginConnect() begins the
 
 The Connected property indicates if the Messenger is currently connected. This status is controlled by the ping mechanism, so it's possible for a connection to have disconnected during the timeout period for the ping (or if pinging is disabled) while Connected remains true. You should account for this in your application. 
 
+When the connection is closed in an orderly manner, a private message is sent to the other end signalling that one side is about to close. This allows the other end to immediately disconnect and clean up rathert than waiting for a ping to fail. When this happens, the OnDisconnected event will be fired. There are also OnClosing and OnClosed events, but these only fire if the local Messenger has Close() called upon it, not when the remote end of the connection closes.
+
 #### Sending messages
 
 The core of the Messenger is a queue to which messages can be added for transmission to the other end of the connection.
