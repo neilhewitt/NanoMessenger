@@ -29,6 +29,7 @@ namespace NanoMessenger
         public const string ACK_MESSAGE = INTERNAL_MESSAGE_TOKEN + "ACK ";
         public const string END_OF_MESSAGE = INTERNAL_MESSAGE_TOKEN + "ENDS";
         public const string CLOSE_MESSAGE = INTERNAL_MESSAGE_TOKEN + "CLOSE";
+        
         public const string PIPE_ESCAPE = INTERNAL_MESSAGE_TOKEN + "PIPE";
 
         public const int BUFFER_SIZE = 65536;
@@ -39,6 +40,7 @@ namespace NanoMessenger
         public const int DEFAULT_MAX_RETRIES = -1; // <=0 == infinite retries
         public const int DEFAULT_LISTEN_TIMEOUT_IN_SECONDS = -1; // <=0 == no timeout
         public const int DEFAULT_WAIT_AFTER_DISCONNECT_IN_SECONDS = 3;
+        public const int DEFAULT_RETRY_INTERVAL_IN_SECONDS = 1;
 
         private Thread _processMessagesTask;
         private Thread _pingTask;
@@ -48,6 +50,7 @@ namespace NanoMessenger
         private NetworkStream _stream;
 
         private bool _disposed;
+        private bool _connecting;
         private bool _connected;
         private bool _disconnecting;
         private bool _listening;
@@ -74,6 +77,7 @@ namespace NanoMessenger
         public int ListenTimeoutInSeconds { get; set; } = DEFAULT_LISTEN_TIMEOUT_IN_SECONDS;
         public int MaxConnectionRetries { get; set; } = DEFAULT_MAX_RETRIES;
         public int WaitAfterDisconnectInSeconds { get; set; } = DEFAULT_WAIT_AFTER_DISCONNECT_IN_SECONDS;
+        public int RetryInterval { get; set; } = DEFAULT_RETRY_INTERVAL_IN_SECONDS;
 
         public string Name { get; private set; }
         public IPAddress RemoteAddress { get; private set; }
@@ -288,7 +292,7 @@ namespace NanoMessenger
                             Thread.Sleep(WaitAfterDisconnectInSeconds * 1000);
                             BeginConnect();
                         }
-                        catch
+                        catch (Exception ex)
                         {
                             throw;
                         }
@@ -311,16 +315,26 @@ namespace NanoMessenger
             else if (!_disconnecting && Type == MessengerType.Receive && _listener != null && _listening && _listener.Pending())
             {
                 OnConnecting?.Invoke(this, EventArgs.Empty);
-                _client = _listener.AcceptTcpClient();
+                try
+                {
+                    _client = _listener.AcceptTcpClient();
+                }
+                catch
+                {
+                    Close();
+                    return;
+                }
 
                 try
                 {
                     RemoteAddress = ((IPEndPoint)_client.Client.RemoteEndPoint).Address;
                     RemoteHostName = Dns.GetHostEntry(RemoteAddress).HostName;
+                    if (string.IsNullOrWhiteSpace(RemoteHostName)) RemoteHostName = RemoteAddress.ToString();
                 }
                 catch
                 {
                     // these values are for reference only... if DNS breaks, not a big deal
+                    RemoteHostName = RemoteAddress.ToString();
                 }
 
                 _listener.Stop();
@@ -328,10 +342,10 @@ namespace NanoMessenger
                 _listener = null;
                 _connected = true;
 
-                OnConnected?.Invoke(this, EventArgs.Empty);
-
                 GetStream();
                 _canPing = true;
+               
+                OnConnected?.Invoke(this, EventArgs.Empty);
             }
         }
 
@@ -339,7 +353,12 @@ namespace NanoMessenger
         {
             if (!_disconnecting && Type == MessengerType.Transmit)
             {
-                OnConnecting?.Invoke(this, EventArgs.Empty);
+                if (!_connecting)
+                {
+                    OnConnecting?.Invoke(this, EventArgs.Empty);
+                    _connecting = true;
+                }
+                
                 TcpClient client = new TcpClient();
                 try
                 {
@@ -355,10 +374,12 @@ namespace NanoMessenger
                 {
                     _client = client;
                     _connected = true;
-                    OnConnected?.Invoke(this, EventArgs.Empty);
+                    _connecting = false;
 
                     GetStream();
                     _canPing = true;
+
+                    OnConnected?.Invoke(this, EventArgs.Empty);
                 }
                 else
                 {
@@ -370,12 +391,14 @@ namespace NanoMessenger
                     _connectionRetriesSoFar++;
                     if (MaxConnectionRetries > 0 && _connectionRetriesSoFar > MaxConnectionRetries)
                     {
+                        _connecting = false;
                         Close();
                         OnConnectionRetriesExceeded?.Invoke(this, EventArgs.Empty);
                         _connectionRetriesSoFar = 0;
                     }
                     else
                     {
+                        Thread.Sleep(RetryInterval * 1000);
                         OnConnectionRetry?.Invoke(this, EventArgs.Empty);
                     }
                 }
@@ -498,9 +521,7 @@ namespace NanoMessenger
         // this is only here as a fail-safe for those who don't remember to call Dispose()
         ~Messenger()
         {
-            Debug.Fail("Your code does not Dispose this object correctly. Please ensure Dispose is called before you finish using the class instance.");
             Dispose(false);
-
         }
 
         private Messenger(string name, ushort port) : this(name, null, port)
