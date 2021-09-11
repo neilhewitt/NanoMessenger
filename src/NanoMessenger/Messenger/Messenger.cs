@@ -32,7 +32,7 @@ namespace NanoMessenger
         public const string PIPE_ESCAPE = INTERNAL_MESSAGE_TOKEN + "PIPE";
 
         public const int BUFFER_SIZE = 65536;
-        public const int DEFAULT_CONNECTION_TIMEOUT_IN_MILLISECONDS = 3000;
+        public const int DEFAULT_CONNECTION_TIMEOUT_IN_SECONDS = 3000;
         public const int DEFAULT_PING_INTERVAL_IN_SECONDS = 3; 
         public const int DEFAULT_PING_TIMEOUT_IN_SECONDS = 5; 
         public const int DEFAULT_MAX_PING_FAILS_ALLOWED = 1; 
@@ -69,7 +69,7 @@ namespace NanoMessenger
         private ConcurrentQueue<QueueEntry> _messageQueue = new ConcurrentQueue<QueueEntry>();
         private object _queueLock = new object();
 
-        public int ConnectionTimeoutInMilliseconds { get; set; } = DEFAULT_CONNECTION_TIMEOUT_IN_MILLISECONDS;
+        public int ConnectionTimeoutInSeconds { get; set; } = DEFAULT_CONNECTION_TIMEOUT_IN_SECONDS;
         public int PingTimeoutInSeconds { get; set; } = DEFAULT_PING_INTERVAL_IN_SECONDS;
         public int PingIntervalInSeconds { get; set; } = DEFAULT_PING_INTERVAL_IN_SECONDS;
         public int MaxAllowedFailedPings { get; set; } = DEFAULT_MAX_PING_FAILS_ALLOWED;
@@ -111,7 +111,7 @@ namespace NanoMessenger
                 if (Type == MessengerType.Receive)
                 {
                     _startedListening = DateTime.Now;
-                    _listener = new TcpListener(IPAddress.Any, Port);
+                    _listener = _listener ?? new TcpListener(IPAddress.Any, Port);
                     _listener.Start();
                     _listening = true;
                 }
@@ -212,7 +212,6 @@ namespace NanoMessenger
 
                 _listener?.Stop();
                 _listening = false;
-                _listener = null;
 
                 _stream?.Close();
                 _client?.Close();
@@ -336,9 +335,8 @@ namespace NanoMessenger
                     RemoteHostName = RemoteAddress.ToString();
                 }
 
-                _listener.Stop();
+                _listener?.Stop();
                 _listening = false;
-                _listener = null;
                 _connected = true;
 
                 GetStream();
@@ -362,7 +360,7 @@ namespace NanoMessenger
                 try
                 {
                     // this is a simple way of enforcing a shorter connect timeout (if required)
-                    client.ConnectAsync(RemoteAddress, Port, ConnectionTimeoutInMilliseconds).Wait();
+                    client.ConnectAsync(RemoteAddress, Port, ConnectionTimeoutInSeconds * 1000).Wait();
                 }
                 catch
                 {
@@ -435,65 +433,72 @@ namespace NanoMessenger
 
         private void ReceiveIncomingMessages()
         {
-            if (!_disconnecting && _stream != null && _stream.DataAvailable)
+            if (!_disconnecting && _connected && _client != null && _stream != null && _stream.DataAvailable)
             {
-                int i;
-                while ((i = _stream.Read(_buffer, 0, _buffer.Length)) != 0)
-                {
-                    string data = $"{ _partialMessageData }{ Encoding.ASCII.GetString(_buffer, 0, i) }";
-                    Array.Clear(_buffer, 0, _buffer.Length);
-
-                    // max data in the read buffer is BUFFER_SIZE bytes which should be enough for most messages
-                    // but in case it isn't, messages will be chunked; each message-end is noted with an escape sequence
-                    // and if the data just read from the stream doesn't end with the end-of-message token, then
-                    // we'll stuff the data into a string field and concatenate the next set of data from the stream until
-                    // we have a complete set of messages available to process
-
-                    if (data.EndsWith(END_OF_MESSAGE))
+                try
+                { 
+                    int i;
+                    while ((i = _stream.Read(_buffer, 0, _buffer.Length)) != 0)
                     {
-                        string[] messages = data.Split(new string[] { END_OF_MESSAGE }, StringSplitOptions.RemoveEmptyEntries);
+                        string data = $"{ _partialMessageData ?? "" }{ Encoding.ASCII.GetString(_buffer, 0, i) }";
+                        Array.Clear(_buffer, 0, _buffer.Length);
 
-                        foreach (string message in messages)
+                        // max data in the read buffer is BUFFER_SIZE bytes which should be enough for most messages
+                        // but in case it isn't, messages will be chunked; each message-end is noted with an escape sequence
+                        // and if the data just read from the stream doesn't end with the end-of-message token, then
+                        // we'll stuff the data into a string field and concatenate the next set of data from the stream until
+                        // we have a complete set of messages available to process
+
+                        if (data.EndsWith(END_OF_MESSAGE))
                         {
-                            if (message == CLOSE_MESSAGE)
+                            string[] messages = data.Split(new string[] { END_OF_MESSAGE }, StringSplitOptions.RemoveEmptyEntries);
+
+                            foreach (string message in messages)
                             {
-                                Close(false);
-                                OnDisconnected.Invoke(this, EventArgs.Empty);
-                                Thread.Sleep(WaitAfterDisconnectInSeconds * 1000);
-                                _pingFails = 0;
-                                BeginConnect();
-                            }
-                            else if (message == PING_MESSAGE)
-                            {
-                                Send($"{ PING_BACK_MESSAGE }");
-                            }
-                            else if (message == PING_BACK_MESSAGE)
-                            {
-                                _pingBackReceived = true; // this is the semaphore for the PingLoop thread
-                                OnPingBack?.Invoke(this, EventArgs.Empty);
-                            }
-                            else
-                            {
-                                if (message.StartsWith(ACK_MESSAGE))
+                                if (message == CLOSE_MESSAGE)
                                 {
-                                    OnReceiveAcknowledge?.Invoke(this, Guid.Parse(message.Substring(ACK_MESSAGE.Length)));
+                                    Close(false);
+                                    OnDisconnected?.Invoke(this, EventArgs.Empty);
+                                    Thread.Sleep(WaitAfterDisconnectInSeconds * 1000);
+                                    _pingFails = 0;
+                                    BeginConnect();
+                                }
+                                else if (message == PING_MESSAGE)
+                                {
+                                    Send($"{ PING_BACK_MESSAGE }");
+                                }
+                                else if (message == PING_BACK_MESSAGE)
+                                {
+                                    _pingBackReceived = true; // this is the semaphore for the PingLoop thread
+                                    OnPingBack?.Invoke(this, EventArgs.Empty);
                                 }
                                 else
                                 {
-                                    Message incomingMessage = Message.FromWireFormat(message);
-                                    Send($"{ ACK_MESSAGE }{ incomingMessage.ID }");
-                                    OnReceiveMessage?.Invoke(this, incomingMessage);
+                                    if (message.StartsWith(ACK_MESSAGE))
+                                    {
+                                        OnReceiveAcknowledge?.Invoke(this, Guid.Parse(message.Substring(ACK_MESSAGE.Length)));
+                                    }
+                                    else
+                                    {
+                                        Message incomingMessage = Message.FromWireFormat(message);
+                                        Send($"{ ACK_MESSAGE }{ incomingMessage.ID }");
+                                        OnReceiveMessage?.Invoke(this, incomingMessage);
+                                    }
                                 }
                             }
-                        }
 
-                        _partialMessageData = "";
-                        break;
+                            _partialMessageData = "";
+                            break;
+                        }
+                        else
+                        {
+                            _partialMessageData = data;
+                        }
                     }
-                    else
-                    {
-                        _partialMessageData = data;
-                    }
+                }
+                catch (NullReferenceException ex)
+                {
+                    throw ex;
                 }
             }
         }
