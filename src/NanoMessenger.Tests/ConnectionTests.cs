@@ -7,16 +7,16 @@ namespace NanoMessenger.Tests
     [TestFixture, Explicit, Timeout(30000)]
     public class ConnectionTests
     {
-        public Messenger MakeTransmitter(int retries = Messenger.DEFAULT_MAX_RETRIES, int connectTimeoutInSeconds = Messenger.DEFAULT_CONNECTION_TIMEOUT)
+        public Messenger MakeTransmitter(int retries = Messenger.DEFAULT_MAX_RETRIES, int connectTimeoutInSeconds = Messenger.DEFAULT_CONNECTION_TIMEOUT_IN_SECONDS)
         {
             Messenger transmitter = Messenger.Transmitter("Server", "127.0.0.1", 16384);
             transmitter.MaxConnectionRetries = retries;
-            transmitter.ConnectTimeoutInSeconds = connectTimeoutInSeconds;
+            transmitter.ConnectionTimeoutInSeconds = connectTimeoutInSeconds;
             transmitter.PingEnabled = false;
             return transmitter;
         }
 
-        public Messenger MakeReceiver(int timeoutInSeconds = Messenger.DEFAULT_CONNECTION_TIMEOUT)
+        public Messenger MakeReceiver(int timeoutInSeconds = Messenger.DEFAULT_CONNECTION_TIMEOUT_IN_SECONDS)
         {
             Messenger receiver = Messenger.Receiver("Server", 16384);
             receiver.ListenTimeoutInSeconds = timeoutInSeconds;
