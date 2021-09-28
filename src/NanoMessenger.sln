@@ -5,7 +5,7 @@ VisualStudioVersion = 16.0.30717.126
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "NanoMessenger", "NanoMessenger\NanoMessenger.csproj", "{B8CF8A22-1D03-4B04-A29A-1E513B43A9F4}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NanoMessenger.Tests", "NanoMessenger.Tests\NanoMessenger.Tests.csproj", "{35B70361-C6BC-48F8-AFF1-64F7CC63C2EC}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "NanoMessenger.Tests", "NanoMessenger.Tests\NanoMessenger.Tests.csproj", "{35B70361-C6BC-48F8-AFF1-64F7CC63C2EC}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{224F6F65-5B53-4173-BC6F-5D3D383F76E5}"
 	ProjectSection(SolutionItems) = preProject

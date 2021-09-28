@@ -6,6 +6,7 @@
     <RootNamespace>NanoMessenger</RootNamespace>
     <Configurations>Debug;Release</Configurations>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageVersion>0.$([System.DateTime]::Now.ToString("MM.dd.HHmm"))</PackageVersion>
     <Version>0.1.0</Version>
   </PropertyGroup>
 

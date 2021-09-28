@@ -10,6 +10,9 @@ namespace NanoMessenger.Tests
     [TestFixture]
     public class MessageTests
     {
+        public const string RESERVED_SEQUENCE_TEXT = "This test message contains the reserved sequences $$ and |.";
+        public const string ESCAPED_SEQUENCE_TEXT = "This test message contains the escaped sequences \\$$ and $$PIPE.";
+
         [Test]
         public void GivenAMessage_WhenConvertedToWireFormat_FormatIsValid()
         {
@@ -27,18 +30,18 @@ namespace NanoMessenger.Tests
         }
 
         [Test]
-        public void GivenMessageTextContainingReservedSequences_WhenWireFormatted_SequencesAreEscaped()
+        public void GivenMessageTextContainsReservedSequences_WhenWireFormatted_SequencesAreEscaped()
         {
-            Message message = new Message("This test message contains the reserved sequences $$ and |.");
+            Message message = new Message(RESERVED_SEQUENCE_TEXT);
             string wireFormat = message.ToWireFormat();
 
-            Assert.That(wireFormat.EndsWith("This test message contains the reserved sequences \\$$ and $$PIPE."));
+            Assert.That(wireFormat.EndsWith(ESCAPED_SEQUENCE_TEXT));
         }
 
         [Test]
-        public void GivenWireFormattedMessageContainingEscapedSequences_WhenParsed_ReservedSequencesAreRestored()
+        public void GivenWireFormattedMessageContainsEscapedSequences_WhenParsed_ReservedSequencesAreRestored()
         {
-            Message message = new Message("This test message contains the reserved sequences $$ and |.");
+            Message message = new Message(RESERVED_SEQUENCE_TEXT);
             string wireFormat = message.ToWireFormat();
             Message message2 = Message.FromWireFormat(wireFormat);
 

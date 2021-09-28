@@ -4,22 +4,22 @@ using NUnit.Framework;
 
 namespace NanoMessenger.Tests
 {
-    [TestFixture, Explicit, Timeout(30000)]
+    [TestFixture, Explicit, Timeout(5000)]
     public class ConnectionTests
     {
         public Messenger MakeTransmitter(int retries = Messenger.DEFAULT_MAX_RETRIES, int connectTimeoutInSeconds = Messenger.DEFAULT_CONNECTION_TIMEOUT_IN_SECONDS)
         {
             Messenger transmitter = Messenger.Transmitter("Server", "127.0.0.1", 16384);
             transmitter.MaxConnectionRetries = retries;
-            transmitter.ConnectionTimeoutInSeconds = connectTimeoutInSeconds;
+            transmitter.ConnectTimeoutInSeconds = connectTimeoutInSeconds;
             transmitter.PingEnabled = false;
             return transmitter;
         }
 
-        public Messenger MakeReceiver(int timeoutInSeconds = Messenger.DEFAULT_CONNECTION_TIMEOUT_IN_SECONDS)
+        public Messenger MakeReceiver(int connectTimeoutInSeconds = Messenger.DEFAULT_CONNECTION_TIMEOUT_IN_SECONDS)
         {
             Messenger receiver = Messenger.Receiver("Server", 16384);
-            receiver.ListenTimeoutInSeconds = timeoutInSeconds;
+            receiver.ListenTimeoutInSeconds = connectTimeoutInSeconds;
             receiver.PingEnabled = false;
             return receiver;
         }
@@ -44,7 +44,7 @@ namespace NanoMessenger.Tests
         [Test]
         public void GivenNoConnectionFromTransmitter_WhenTimeoutIsSetAndExceeded_ReceiverConnectionFailsAndIsClosed()
         {
-            using (Messenger client = MakeReceiver(timeoutInSeconds: 5))
+            using (Messenger client = MakeReceiver(connectTimeoutInSeconds: 5))
             {
                 bool waiting = true;
                 client.OnListenerTimedOut += (sender, e) => {

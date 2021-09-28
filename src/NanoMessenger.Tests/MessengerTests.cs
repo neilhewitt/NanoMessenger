@@ -14,10 +14,10 @@ namespace NanoMessenger.Tests
         public void WhenMessageIsAddedToQueue_PeekQueueReturnsMostRecentMessage()
         {
             Messenger messenger = Messenger.Transmitter("Test", "127.0.0.1", 16384);
-            messenger.QueueMessage("First message.");
-            messenger.QueueMessage("Second message.");
+            messenger.QueueMessage("First");
+            messenger.QueueMessage("Second");
 
-            Assert.That(messenger.PeekQueue().Text == "First message.");
+            Assert.That(messenger.PeekQueue().Message.Text == "First");
         }
     }
 }

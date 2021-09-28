@@ -66,17 +66,17 @@ namespace NanoMessenger
         private byte[] _buffer = new byte[BUFFER_SIZE];
         private string _partialMessageData = "";
 
-        private ConcurrentQueue<QueueEntry> _messageQueue = new ConcurrentQueue<QueueEntry>();
+        private ConcurrentQueue<MessageQueueEntry> _messageQueue = new ConcurrentQueue<MessageQueueEntry>();
         private object _queueLock = new object();
 
-        public int ConnectionTimeoutInSeconds { get; set; } = DEFAULT_CONNECTION_TIMEOUT_IN_SECONDS;
+        public int ConnectTimeoutInSeconds { get; set; } = DEFAULT_CONNECTION_TIMEOUT_IN_SECONDS;
         public int PingTimeoutInSeconds { get; set; } = DEFAULT_PING_INTERVAL_IN_SECONDS;
         public int PingIntervalInSeconds { get; set; } = DEFAULT_PING_INTERVAL_IN_SECONDS;
-        public int MaxAllowedFailedPings { get; set; } = DEFAULT_MAX_PING_FAILS_ALLOWED;
+        public int MaxPingFailsAllowed { get; set; } = DEFAULT_MAX_PING_FAILS_ALLOWED;
         public int ListenTimeoutInSeconds { get; set; } = DEFAULT_LISTEN_TIMEOUT_IN_SECONDS;
         public int MaxConnectionRetries { get; set; } = DEFAULT_MAX_RETRIES;
         public int WaitAfterDisconnectInSeconds { get; set; } = DEFAULT_WAIT_AFTER_DISCONNECT_IN_SECONDS;
-        public int RetryInterval { get; set; } = DEFAULT_RETRY_INTERVAL_IN_SECONDS;
+        public int RetryIntervalInSeconds { get; set; } = DEFAULT_RETRY_INTERVAL_IN_SECONDS;
 
         public string Name { get; private set; }
         public IPAddress RemoteAddress { get; private set; }
@@ -91,14 +91,14 @@ namespace NanoMessenger
         public int QueueLength => _messageQueue?.Count ?? -1;
 
         public event EventHandler<Message> OnReceiveMessage;
-        public event EventHandler<Guid> OnReceiveAcknowledge;
+        public event EventHandler<Guid> OnReceiveAcknowledgement;
         public event EventHandler OnConnecting;
         public event EventHandler OnConnectionRetry;
         public event EventHandler OnConnected;
         public event EventHandler OnDisconnected;
         public event EventHandler OnClosing;
         public event EventHandler OnClosed;
-        public event EventHandler OnMessageLoopIOException;
+        public event EventHandler<IOException> OnMessageLoopIOException;
         public event EventHandler OnPing;
         public event EventHandler OnPingBack;
         public event EventHandler OnListenerTimedOut;
@@ -143,25 +143,25 @@ namespace NanoMessenger
             lock (_queueLock)
             {
                 Message message = new Message(text);
-                QueueEntry item = new QueueEntry(message, callbackAfterSent);
-                _messageQueue.Enqueue(item);
+                MessageQueueEntry entry = new MessageQueueEntry(message, callbackAfterSent);
+                _messageQueue.Enqueue(entry);
                 return message;
             }
         }
 
-        public IEnumerable<Message> GetQueuedMessages()
+        public IEnumerable<MessageQueueEntry> GetQueueEntries()
         {
             lock (_queueLock)
             {
-                return new List<Message>(_messageQueue.Select(x => x.Message));
+                return new List<MessageQueueEntry>(_messageQueue.Select(x => x));
             }
         }
 
-        public Message PeekQueue()
+        public MessageQueueEntry PeekQueue()
         {
             lock (_queueLock)
             {
-                return _messageQueue.TryPeek(out QueueEntry entry) ? entry.Message : null;
+                return _messageQueue.TryPeek(out MessageQueueEntry entry) ? entry : null;
             }
         }
 
@@ -169,7 +169,7 @@ namespace NanoMessenger
         {
             lock(_queueLock)
             {
-                _messageQueue = new ConcurrentQueue<QueueEntry>();
+                _messageQueue = new ConcurrentQueue<MessageQueueEntry>();
             }
         }
 
@@ -243,7 +243,7 @@ namespace NanoMessenger
                         if (!_pingBackReceived)
                         {
                             _pingFails++;
-                            if (_pingFails > MaxAllowedFailedPings)
+                            if (_pingFails > MaxPingFailsAllowed)
                             {
                                 Close();
                                 OnDisconnected?.Invoke(this, EventArgs.Empty);
@@ -282,11 +282,11 @@ namespace NanoMessenger
                         {
                             ReceiveIncomingMessages();
                         }
-                        catch (IOException)
+                        catch (IOException ex)
                         {
                             // probably the client closed down... let's start trying to reconnect
                             Close();
-                            OnMessageLoopIOException?.Invoke(this, EventArgs.Empty);
+                            OnMessageLoopIOException?.Invoke(this, ex);
                             Thread.Sleep(WaitAfterDisconnectInSeconds * 1000);
                             BeginConnect();
                         }
@@ -360,7 +360,7 @@ namespace NanoMessenger
                 try
                 {
                     // this is a simple way of enforcing a shorter connect timeout (if required)
-                    client.ConnectAsync(RemoteAddress, Port, ConnectionTimeoutInSeconds * 1000).Wait();
+                    client.ConnectAsync(RemoteAddress, Port, ConnectTimeoutInSeconds * 1000).Wait();
                 }
                 catch
                 {
@@ -395,7 +395,7 @@ namespace NanoMessenger
                     }
                     else
                     {
-                        Thread.Sleep(RetryInterval * 1000);
+                        Thread.Sleep(RetryIntervalInSeconds * 1000);
                         OnConnectionRetry?.Invoke(this, EventArgs.Empty);
                     }
                 }
@@ -418,7 +418,7 @@ namespace NanoMessenger
                 {
                     if (!_disconnecting && _messageQueue.Count > 0)
                     {
-                        if (_messageQueue.TryDequeue(out QueueEntry topOfQueue))
+                        if (_messageQueue.TryDequeue(out MessageQueueEntry topOfQueue))
                         {
                             bool sent = Send($"{ topOfQueue.Message.ToWireFormat() }");
                             if (sent)
@@ -476,7 +476,7 @@ namespace NanoMessenger
                                 {
                                     if (message.StartsWith(ACK_MESSAGE))
                                     {
-                                        OnReceiveAcknowledge?.Invoke(this, Guid.Parse(message.Substring(ACK_MESSAGE.Length)));
+                                        OnReceiveAcknowledgement?.Invoke(this, Guid.Parse(message.Substring(ACK_MESSAGE.Length)));
                                     }
                                     else
                                     {
