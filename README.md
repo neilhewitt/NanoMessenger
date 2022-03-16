@@ -127,12 +127,12 @@ I'm acutely aware that having just told you to always dispose, this code does no
                 receiver.OnReceiveMessage += (sender, message) => { Console.ForegroundColor = ConsoleColor.Green; Console.WriteLine($"Message: { message.Text }"); };
                 receiver.OnPing += (sender, e) => { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine("Receiver ping..."); };
                 receiver.OnPingBack += (sender, e) => { Console.ForegroundColor = ConsoleColor.Red; Console.WriteLine("Receiver pingback."); };
-                receiver.Open();
+                receiver.BeginConnect();
 
                 transmitter.OnReceiveAcknowledge += (sender, id) => { Console.ForegroundColor = ConsoleColor.Yellow; Console.WriteLine($"Acknowledge: { id.ToString() }"); };
                 transmitter.OnPing += (sender, e) => { Console.ForegroundColor = ConsoleColor.Blue; Console.WriteLine("Transmitter ping..."); };
                 transmitter.OnPingBack += (sender, e) => { Console.ForegroundColor = ConsoleColor.Blue; Console.WriteLine("Transmitter pingback."); };
-                transmitter.Open();
+                transmitter.BeginConnect();
 
                 while (true)
                 {
